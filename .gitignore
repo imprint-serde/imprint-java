@@ -61,8 +61,4 @@ buildNumber.properties
 
 # JAR files (unless they're dependencies)
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
 !lombok.jar
-
-# Benchmark Results (keep timestamped results in repo for tracking)
-# benchmark-results/ - Commented out to keep results in repo
