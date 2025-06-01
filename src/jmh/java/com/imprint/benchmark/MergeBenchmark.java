@@ -100,8 +100,8 @@ public class MergeBenchmark {
             int fieldId = entry.getId();
             if (!usedFieldIds.contains(fieldId)) {
                 var value = record.getValue(fieldId);
-                if (value != null) {
-                    writer.addField(fieldId, value);
+                if (value.isPresent()) {
+                    writer.addField(fieldId, value.get());
                     usedFieldIds.add(fieldId);
                 }
             }

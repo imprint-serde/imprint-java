@@ -169,7 +169,6 @@ public abstract class Value {
     }
     
     // Float64 Value
-
     @Getter
     @EqualsAndHashCode(callSuper = false)
     public static class Float64Value extends Value {
@@ -181,7 +180,7 @@ public abstract class Value {
 
         @Override
         public TypeCode getTypeCode() { return TypeCode.FLOAT64; }
-
+        
         @Override
         public String toString() {
             return String.valueOf(value);
@@ -189,36 +188,26 @@ public abstract class Value {
     }
     
     // Bytes Value (array-based)
-    @Getter
     public static class BytesValue extends Value {
-        /**
-         *  Returns internal array. MUST NOT be modified by caller.
-         */
         private final byte[] value;
-
-        /**
-         * Takes ownership of the byte array. Caller must not modify after construction.
-         */
+        
         public BytesValue(byte[] value) {
-            this.value = Objects.requireNonNull(value);
+            this.value = value.clone(); // defensive copy
         }
-
+        
+        public byte[] getValue() { 
+            return value.clone(); // defensive copy
+        }
+        
         @Override
         public TypeCode getTypeCode() { return TypeCode.BYTES; }
         
         @Override
         public boolean equals(Object obj) {
             if (this == obj) return true;
-            if (obj == null) return false;
-            if (obj instanceof BytesValue) {
-                BytesValue that = (BytesValue) obj;
-                return Arrays.equals(value, that.value);
-            }
-            if (obj instanceof BytesBufferValue) {
-                BytesBufferValue that = (BytesBufferValue) obj;
-                return Arrays.equals(value, that.getValue());
-            }
-            return false;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            BytesValue that = (BytesValue) obj;
+            return Arrays.equals(value, that.value);
         }
         
         @Override
@@ -237,7 +226,7 @@ public abstract class Value {
         private final ByteBuffer value;
         
         public BytesBufferValue(ByteBuffer value) {
-            this.value = value.asReadOnlyBuffer();
+            this.value = value.asReadOnlyBuffer(); // zero-copy read-only view
         }
         
         public byte[] getValue() { 
@@ -248,7 +237,7 @@ public abstract class Value {
         }
         
         public ByteBuffer getBuffer() {
-            return value.duplicate();
+            return value.duplicate(); // zero-copy view
         }
         
         @Override
@@ -281,47 +270,17 @@ public abstract class Value {
     }
     
     // String Value (String-based)
+    @Getter
+    @EqualsAndHashCode(callSuper = false)
     public static class StringValue extends Value {
-        @Getter
         private final String value;
-        private volatile byte[] cachedUtf8Bytes; // Cache UTF-8 encoding
         
         public StringValue(String value) {
             this.value = Objects.requireNonNull(value, "String cannot be null");
         }
 
-        public byte[] getUtf8Bytes() {
-            var cached = cachedUtf8Bytes;
-            if (cached == null) {
-                // UTF8 is idempotent so no need to synchronize
-                cached = value.getBytes(StandardCharsets.UTF_8);
-                cachedUtf8Bytes = cached;
-            }
-            return cached; // Return computed value
-        }
-
         @Override
         public TypeCode getTypeCode() { return TypeCode.STRING; }
-        
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) return true;
-            if (obj == null) return false;
-            if (obj instanceof StringValue) {
-                StringValue that = (StringValue) obj;
-                return value.equals(that.value);
-            }
-            if (obj instanceof StringBufferValue) {
-                StringBufferValue that = (StringBufferValue) obj;
-                return value.equals(that.getValue());
-            }
-            return false;
-        }
-        
-        @Override
-        public int hashCode() {
-            return value.hashCode();
-        }
         
         @Override
         public String toString() {
@@ -329,57 +288,35 @@ public abstract class Value {
         }
     }
     
-    // String Value (ByteBuffer-based)
+    // String Value (ByteBuffer-based, zero-copy)
     public static class StringBufferValue extends Value {
         private final ByteBuffer value;
-        private volatile String cachedString;
-
-        private static final int THREAD_LOCAL_BUFFER_SIZE = 1024;
-        private static final ThreadLocal<byte[]> DECODE_BUFFER_CACHE =
-                ThreadLocal.withInitial(() -> new byte[THREAD_LOCAL_BUFFER_SIZE]);
-
+        private volatile String cachedString; // lazy decode
+        
         public StringBufferValue(ByteBuffer value) {
-            this.value = value.asReadOnlyBuffer();
+            this.value = value.asReadOnlyBuffer(); // zero-copy read-only view
         }
-
+        
         public String getValue() {
-            String result = cachedString;
-            if (result == null) {
-                result = decodeUtf8();
-                cachedString = result;
-            }
-            return result;
-        }
-
-        private String decodeUtf8() {
-            final byte[] array;
-            final int offset;
-            final int length = value.remaining();
-
-            if (value.hasArray()) {
-                array = value.array();
-                offset = value.arrayOffset() + value.position();
-            } else {
-                byte[] threadLocalBuffer = DECODE_BUFFER_CACHE.get();
-                if (length <= threadLocalBuffer.length) {
-                    array = threadLocalBuffer;
-                } else {
-                    // Fallback: copy bytes from the ByteBuffer to a new heap array (if too large for cache)
-                    array = new byte[length];
+            if (cachedString == null) {
+                synchronized (this) {
+                    if (cachedString == null) {
+                        var array = new byte[value.remaining()];
+                        value.duplicate().get(array);
+                        cachedString = new String(array, StandardCharsets.UTF_8);
+                    }
                 }
-                value.duplicate().get(array, 0, length);
-                offset = 0;
             }
-            return new String(array, offset, length, StandardCharsets.UTF_8);
+            return cachedString;
         }
-
+        
         public ByteBuffer getBuffer() {
-            return value.duplicate();
+            return value.duplicate(); // zero-copy view
         }
-
+        
         @Override
         public TypeCode getTypeCode() { return TypeCode.STRING; }
-
+        
         @Override
         public boolean equals(Object obj) {
             if (this == obj) return true;
@@ -394,12 +331,12 @@ public abstract class Value {
             }
             return false;
         }
-
+        
         @Override
         public int hashCode() {
             return getValue().hashCode(); // Use string hash for consistency
         }
-
+        
         @Override
         public String toString() {
             return "\"" + getValue() + "\"";

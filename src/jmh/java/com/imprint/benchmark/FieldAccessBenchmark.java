@@ -200,9 +200,7 @@ public class FieldAccessBenchmark {
         
         for (int fieldId : fieldIds) {
             var value = source.getValue(fieldId);
-            if (value != null) {
-                writer.addField(fieldId, value);
-            }
+            value.ifPresent(value1 -> writer.addField(fieldId, value1));
         }
         
         return writer.build();

@@ -119,11 +119,11 @@ public class SerializationBenchmark {
         );
         writer.addField(6, Value.fromArray(tags));
         
-        // Add map field (all string values for consistency)
+        // Add map field
         var metadata = new HashMap<MapKey, Value>();
         metadata.put(MapKey.fromString("manufacturer"), Value.fromString("TechCorp"));
         metadata.put(MapKey.fromString("model"), Value.fromString("TC-2024"));
-        metadata.put(MapKey.fromString("year"), Value.fromString("2024"));
+        metadata.put(MapKey.fromString("year"), Value.fromInt32(2024));
         writer.addField(7, Value.fromMap(metadata));
         
         // Add more fields for medium size
