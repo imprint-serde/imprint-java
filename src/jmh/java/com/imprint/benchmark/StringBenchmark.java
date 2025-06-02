@@ -44,6 +44,10 @@ public class StringBenchmark {
     private byte[] serializedLarge10K;
     private byte[] serializedLarge100K;
     private byte[] serializedLarge1M;
+
+    private ImprintRecord preDeserializedSmall5;
+    private ImprintRecord preDeserializedMedium500;
+    private ImprintRecord preDeserializedLarge100K;
     
     @Setup
     public void setup() throws Exception {
@@ -66,6 +70,10 @@ public class StringBenchmark {
         serializedLarge10K = bufferToArray(createStringRecord(largeString10K).serializeToBuffer());
         serializedLarge100K = bufferToArray(createStringRecord(largeString100K).serializeToBuffer());
         serializedLarge1M = bufferToArray(createStringRecord(largeString1M).serializeToBuffer());
+
+        preDeserializedSmall5 = ImprintRecord.deserialize(serializedSmall5);
+        preDeserializedMedium500 = ImprintRecord.deserialize(serializedMedium500);
+        preDeserializedLarge100K = ImprintRecord.deserialize(serializedLarge100K);
     }
     
     private String generateString(int length) {
@@ -237,6 +245,30 @@ public class StringBenchmark {
     @Benchmark
     public int measureLargeString100KSize() throws Exception {
         return createStringRecord(largeString100K).serializeToBuffer().remaining();
+    }
+
+    // Pure string access benchmarks (no record deserialization overhead)
+    @Benchmark
+    public String pureStringAccessSmall5() throws Exception {
+        return preDeserializedSmall5.getValue(1).map(this::extractString).orElse(null);
+    }
+
+    @Benchmark
+    public String pureStringAccessMedium500() throws Exception {
+        return preDeserializedMedium500.getValue(1).map(this::extractString).orElse(null);
+    }
+
+    @Benchmark
+    public String pureStringAccessLarge100K() throws Exception {
+        return preDeserializedLarge100K.getValue(1).map(this::extractString).orElse(null);
+    }
+
+    // Test cached vs uncached access
+    @Benchmark
+    public String cachedStringAccessSmall5() throws Exception {
+        // Second access should hit cache
+        preDeserializedSmall5.getValue(1).map(this::extractString).orElse(null);
+        return preDeserializedSmall5.getValue(1).map(this::extractString).orElse(null);
     }
     
     public static void main(String[] args) throws Exception {
