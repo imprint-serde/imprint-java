@@ -61,6 +61,7 @@ jmh {
     iterations = 3
     resultFormat = 'JSON'
     includeTests = false
+    resultsFile = file("${projectDir}/benchmark-results/jmh-results-${new Date().format('yyyy-MM-dd-HHmmss')}.json")
 }
 
 compileJava {
