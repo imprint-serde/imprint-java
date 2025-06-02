@@ -270,13 +270,24 @@ public abstract class Value {
     }
     
     // String Value (String-based)
-    @Getter
     @EqualsAndHashCode(callSuper = false)
     public static class StringValue extends Value {
+        @Getter
         private final String value;
+        private volatile byte[] cachedUtf8Bytes; // Cache UTF-8 encoding
         
         public StringValue(String value) {
             this.value = Objects.requireNonNull(value, "String cannot be null");
+        }
+
+        public byte[] getUtf8Bytes() {
+            byte[] cached = cachedUtf8Bytes;
+            if (cached == null) {
+                // Multiple threads may compute this - that's OK since it's idempotent
+                cached = value.getBytes(StandardCharsets.UTF_8);
+                cachedUtf8Bytes = cached; // Benign race - last writer wins
+            }
+            return cached; // Return our computed value, not re-read from volatile field
         }
 
         @Override
@@ -288,35 +299,46 @@ public abstract class Value {
         }
     }
     
-    // String Value (ByteBuffer-based, zero-copy)
+    // String Value (ByteBuffer-based)
     public static class StringBufferValue extends Value {
         private final ByteBuffer value;
         private volatile String cachedString; // lazy decode
-        
+
         public StringBufferValue(ByteBuffer value) {
             this.value = value.asReadOnlyBuffer(); // zero-copy read-only view
         }
-        
+
         public String getValue() {
-            if (cachedString == null) {
-                synchronized (this) {
-                    if (cachedString == null) {
-                        var array = new byte[value.remaining()];
-                        value.duplicate().get(array);
-                        cachedString = new String(array, StandardCharsets.UTF_8);
-                    }
-                }
+            String result = cachedString;
+            if (result == null) {
+                // Simple, fast decoding - no thread-local overhead
+                result = decodeUtf8();
+                cachedString = result;
             }
-            return cachedString;
+            return result;
         }
-        
+
+        private String decodeUtf8() {
+            // Fast path: zero-copy for array-backed ByteBuffers
+            if (value.hasArray() && value.arrayOffset() == 0) {
+                return new String(value.array(), value.position(),
+                        value.remaining(), StandardCharsets.UTF_8);
+            }
+
+            // Fallback path - should be impossible since deserialize uses wrap() to create an array-backed ByteBuffer.
+            // Allocation required for direct ByteBuffers since Java's String API doesn't provide ByteBuffer constructors
+            var array = new byte[value.remaining()];
+            value.duplicate().get(array);
+            return new String(array, StandardCharsets.UTF_8);
+        }
+
         public ByteBuffer getBuffer() {
             return value.duplicate(); // zero-copy view
         }
-        
+
         @Override
         public TypeCode getTypeCode() { return TypeCode.STRING; }
-        
+
         @Override
         public boolean equals(Object obj) {
             if (this == obj) return true;
@@ -331,12 +353,12 @@ public abstract class Value {
             }
             return false;
         }
-        
+
         @Override
         public int hashCode() {
             return getValue().hashCode(); // Use string hash for consistency
         }
-        
+
         @Override
         public String toString() {
             return "\"" + getValue() + "\"";
