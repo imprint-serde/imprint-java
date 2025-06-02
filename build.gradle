@@ -72,4 +72,6 @@ javadoc {
     if(JavaVersion.current().isJava9Compatible()) {
         options.addBooleanOption('html5', true)
     }
+    // Don't fail build on missing javadoc
+    options.addStringOption('Xdoclint:none', '-quiet')
 }

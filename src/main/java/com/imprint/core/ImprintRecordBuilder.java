@@ -11,14 +11,16 @@ import java.util.*;
  * developer-friendly API that eliminates boilerplate Value.fromX() calls.
  * <p>
  * Usage:
+ * <pre>
  *   var record = ImprintRecord.builder(schemaId)
- *       .field(1, 42)              // int -> Int32Value  
- *       .field(2, "hello")         // String -> StringValue
- *       .field(3, 3.14)            // double -> Float64Value
- *       .field(4, bytes)           // byte[] -> BytesValue
- *       .field(5, true)            // boolean -> BoolValue
- *       .nullField(6)              // -> NullValue
+ *       .field(1, 42)              // int to Int32Value  
+ *       .field(2, "hello")         // String to StringValue
+ *       .field(3, 3.14)            // double to Float64Value
+ *       .field(4, bytes)           // byte[] to BytesValue
+ *       .field(5, true)            // boolean to BoolValue
+ *       .nullField(6)              // to NullValue
  *       .build();
+ * </pre>
  */
 public final class ImprintRecordBuilder {
     private final SchemaId schemaId;
