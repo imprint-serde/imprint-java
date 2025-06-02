@@ -114,14 +114,14 @@ public final class ImprintRecord {
     }
     
     /**
-     * Deserialize a record from bytes.
+     * Deserialize a record from bytes through an array backed ByteBuffer.
      */
     public static ImprintRecord deserialize(byte[] bytes) throws ImprintException {
         return deserialize(ByteBuffer.wrap(bytes));
     }
     
     /**
-     * Deserialize a record from a ByteBuffer (zero-copy when possible).
+     * Deserialize a record from a ByteBuffer.
      */
     public static ImprintRecord deserialize(ByteBuffer buffer) throws ImprintException {
         buffer = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);

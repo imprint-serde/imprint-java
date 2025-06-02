@@ -4,7 +4,6 @@ import com.imprint.error.ImprintException;
 import com.imprint.util.VarInt;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 
 /**
  * Interface for handling type-specific serialization, deserialization, and size estimation.
@@ -270,7 +269,7 @@ public interface TypeHandler {
                 buffer.put(stringBuffer);
             } else {
                 Value.StringValue stringValue = (Value.StringValue) value;
-                byte[] stringBytes = stringValue.getValue().getBytes(StandardCharsets.UTF_8);
+                byte[] stringBytes = stringValue.getUtf8Bytes(); // Use cached UTF-8 bytes
                 VarInt.encode(stringBytes.length, buffer);
                 buffer.put(stringBytes);
             }
@@ -283,9 +282,9 @@ public interface TypeHandler {
                 int length = bufferValue.getBuffer().remaining();
                 return VarInt.encodedLength(length) + length;
             } else {
-                String str = ((Value.StringValue) value).getValue();
-                int utf8Length = str.getBytes(StandardCharsets.UTF_8).length;
-                return VarInt.encodedLength(utf8Length) + utf8Length;
+                Value.StringValue stringValue = (Value.StringValue) value;
+                byte[] utf8Bytes = stringValue.getUtf8Bytes(); // Use cached UTF-8 bytes
+                return VarInt.encodedLength(utf8Bytes.length) + utf8Bytes.length;
             }
         }
         
