@@ -5,6 +5,7 @@ import com.imprint.core.SchemaId;
 import com.imprint.types.Value;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 import java.nio.ByteBuffer;
@@ -14,9 +15,8 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
 @Fork(1)
-@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
-@SuppressWarnings("unused")
+@Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 public class StringBenchmark {
     
     private static final SchemaId SCHEMA_ID = new SchemaId(1, 42);
@@ -44,10 +44,6 @@ public class StringBenchmark {
     private byte[] serializedLarge10K;
     private byte[] serializedLarge100K;
     private byte[] serializedLarge1M;
-
-    private ImprintRecord preDeserializedSmall5;
-    private ImprintRecord preDeserializedMedium500;
-    private ImprintRecord preDeserializedLarge100K;
     
     @Setup
     public void setup() throws Exception {
@@ -70,10 +66,6 @@ public class StringBenchmark {
         serializedLarge10K = bufferToArray(createStringRecord(largeString10K).serializeToBuffer());
         serializedLarge100K = bufferToArray(createStringRecord(largeString100K).serializeToBuffer());
         serializedLarge1M = bufferToArray(createStringRecord(largeString1M).serializeToBuffer());
-
-        preDeserializedSmall5 = ImprintRecord.deserialize(serializedSmall5);
-        preDeserializedMedium500 = ImprintRecord.deserialize(serializedMedium500);
-        preDeserializedLarge100K = ImprintRecord.deserialize(serializedLarge100K);
     }
     
     private String generateString(int length) {
@@ -195,22 +187,19 @@ public class StringBenchmark {
     @Benchmark
     public String accessSmallString5() throws Exception {
         ImprintRecord record = ImprintRecord.deserialize(serializedSmall5);
-        Value value = record.getValue(1);
-        return value != null ? extractString(value) : null;
+        return record.getValue(1).map(this::extractString).orElse(null);
     }
     
     @Benchmark
     public String accessMediumString500() throws Exception {
         ImprintRecord record = ImprintRecord.deserialize(serializedMedium500);
-        Value value = record.getValue(1);
-        return value != null ? extractString(value) : null;
+        return record.getValue(1).map(this::extractString).orElse(null);
     }
     
     @Benchmark
     public String accessLargeString100K() throws Exception {
         ImprintRecord record = ImprintRecord.deserialize(serializedLarge100K);
-        Value value = record.getValue(1);
-        return value != null ? extractString(value) : null;
+        return record.getValue(1).map(this::extractString).orElse(null);
     }
     
     // Raw bytes access benchmarks (zero-copy)
@@ -218,19 +207,19 @@ public class StringBenchmark {
     @Benchmark
     public ByteBuffer getRawBytesSmallString5() throws Exception {
         ImprintRecord record = ImprintRecord.deserialize(serializedSmall5);
-        return record.getRawBytes(1);
+        return record.getRawBytes(1).orElse(null);
     }
     
     @Benchmark
     public ByteBuffer getRawBytesMediumString500() throws Exception {
         ImprintRecord record = ImprintRecord.deserialize(serializedMedium500);
-        return record.getRawBytes(1);
+        return record.getRawBytes(1).orElse(null);
     }
     
     @Benchmark
     public ByteBuffer getRawBytesLargeString100K() throws Exception {
         ImprintRecord record = ImprintRecord.deserialize(serializedLarge100K);
-        return record.getRawBytes(1);
+        return record.getRawBytes(1).orElse(null);
     }
     
     // Size measurement benchmarks
@@ -249,67 +238,10 @@ public class StringBenchmark {
     public int measureLargeString100KSize() throws Exception {
         return createStringRecord(largeString100K).serializeToBuffer().remaining();
     }
-
-    // Pure string access benchmarks (no record deserialization overhead)
-    @Benchmark
-    public String pureStringAccessSmall5() throws Exception {
-        Value value = preDeserializedSmall5.getValue(1);
-        return value != null ? extractString(value) : null;
-    }
-
-    @Benchmark
-    public String pureStringAccessMedium500() throws Exception {
-        Value value = preDeserializedMedium500.getValue(1);
-        return value != null ? extractString(value) : null;
-    }
-
-    @Benchmark
-    public String pureStringAccessLarge100K() throws Exception {
-        Value value = preDeserializedLarge100K.getValue(1);
-        return value != null ? extractString(value) : null;
-    }
-
-    // Test cached vs uncached access
-    @Benchmark
-    public String cachedStringAccessSmall5() throws Exception {
-        // Second access should hit cache
-        Value value1 = preDeserializedSmall5.getValue(1);
-        String result1 = value1 != null ? extractString(value1) : null;
-        Value value2 = preDeserializedSmall5.getValue(1);
-        return value2 != null ? extractString(value2) : null;
-    }
     
     public static void main(String[] args) throws Exception {
-        runDeserializationOnly();
-    }
-
-    public static void runAll() throws Exception {
-        var opt = new OptionsBuilder()
-                .include(StringBenchmark.class.getSimpleName())
-                .build();
-        new Runner(opt).run();
-    }
-    
-    /**
-     * Run only string deserialization benchmarks to measure the impact of 
-     * ThreadLocal buffer pool optimization and fast/fallback path performance.
-     */
-    public static void runDeserializationOnly() throws Exception {
-        var opt = new OptionsBuilder()
-            .include(StringBenchmark.class.getSimpleName() + ".*deserialize.*") // Only deserialize methods
-            .forks(0) // Run in same JVM to avoid serialization issues
-            .build();
-        new Runner(opt).run();
-    }
-    
-    /**
-     * Run only pure string access benchmarks (no record deserialization overhead)
-     * to isolate string decode performance with ThreadLocal buffer optimization.
-     */
-    public static void runStringAccessOnly() throws Exception {
-        var opt = new OptionsBuilder()
-            .include(StringBenchmark.class.getSimpleName() + ".*(pureStringAccess|cachedStringAccess).*") // Only pure string access methods
-            .forks(0) // Run in same JVM to avoid serialization issues
+        Options opt = new OptionsBuilder()
+            .include(StringBenchmark.class.getSimpleName())
             .build();
         new Runner(opt).run();
     }
