@@ -61,4 +61,5 @@ buildNumber.properties
 
 # JAR files (unless they're dependencies)
 *.jar
+!gradle/wrapper/gradle-wrapper.jar
 !lombok.jar
