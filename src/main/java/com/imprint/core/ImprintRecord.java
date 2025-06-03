@@ -1,4 +1,3 @@
-
 package com.imprint.core;
 
 import com.imprint.Constants;
@@ -70,9 +69,12 @@ public final class ImprintRecord {
         var entry = directory.get(index);
         int startOffset = entry.getOffset();
         int endOffset = (index + 1 < directory.size()) ? 
-            directory.get(index + 1).getOffset() : payload.remaining();
+            directory.get(index + 1).getOffset() : payload.limit();
             
         var fieldBuffer = payload.duplicate();
+        if (startOffset > payload.limit() || endOffset > payload.limit() || startOffset > endOffset) {
+            return null;
+        }
         fieldBuffer.position(startOffset).limit(endOffset);
         return fieldBuffer.slice();
     }
@@ -249,10 +251,9 @@ public final class ImprintRecord {
     }
     
     private Value deserializeValue(TypeCode typeCode, ByteBuffer buffer) throws ImprintException {
-        // Buffer is already positioned and limited correctly
-        buffer = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer valueSpecificBuffer = buffer.duplicate();
+        valueSpecificBuffer.order(ByteOrder.LITTLE_ENDIAN);
         
-        // Use TypeHandler for simple types
         switch (typeCode) {
             case NULL:
             case BOOL:
@@ -264,11 +265,9 @@ public final class ImprintRecord {
             case STRING:
             case ARRAY:
             case MAP:
-                return typeCode.getHandler().deserialize(buffer);
-            //TODO eliminate this switch entirely by implementing a ROW TypeHandler
+                return typeCode.getHandler().deserialize(valueSpecificBuffer);
             case ROW:
-                var remainingBuffer = buffer.slice();
-                var nestedRecord = deserialize(remainingBuffer);
+                var nestedRecord = deserialize(valueSpecificBuffer);
                 return Value.fromRow(nestedRecord);
 
             default:
