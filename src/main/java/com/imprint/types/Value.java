@@ -335,8 +335,9 @@ public abstract class Value {
         }
 
         public String getValue() {
-            var result = cachedString;
+            String result = cachedString;
             if (result == null) {
+                // Simple, fast decoding - no thread-local overhead
                 result = decodeUtf8();
                 cachedString = result;
             }
@@ -344,17 +345,18 @@ public abstract class Value {
         }
 
         private String decodeUtf8() {
-            // Zero-copy path: use underlying array directly with correct offset
+            // Fast path: zero-copy for array-backed ByteBuffers
             if (value.hasArray()) {
-                byte[] array = value.array();
-                int offset = value.arrayOffset() + value.position();
-                int length = value.remaining();
-                return new String(array, offset, length, StandardCharsets.UTF_8);
+                return new String(value.array(), value.arrayOffset() + value.position(),
+                        value.remaining(), StandardCharsets.UTF_8);
             }
-            // Fallback path for direct ByteBuffers (rare case)
-            byte[] tempBuffer = new byte[value.remaining()];
-            value.duplicate().get(tempBuffer);
-            return new String(tempBuffer, StandardCharsets.UTF_8);
+
+            // Fallback path for non-array-backed ByteBuffers (e.g., direct buffers).
+            // Allocation is required here as Java's String(byte[],...) constructor needs a heap array.
+            // Data is copied from the ByteBuffer to a new byte array.
+            var array = new byte[value.remaining()];
+            value.duplicate().get(array);
+            return new String(array, StandardCharsets.UTF_8);
         }
 
         public ByteBuffer getBuffer() {
