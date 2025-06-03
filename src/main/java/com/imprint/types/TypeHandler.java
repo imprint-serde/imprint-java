@@ -19,6 +19,49 @@ public interface TypeHandler {
     int estimateSize(Value value) throws ImprintException;
     ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException;
     
+    // Helper method to eliminate duplication in ARRAY/MAP readValueBytes
+    static ByteBuffer readComplexValueBytes(ByteBuffer buffer, String typeName, 
+                                           ComplexValueMeasurer measurer) throws ImprintException {
+        int initialPosition = buffer.position();
+        ByteBuffer tempBuffer = buffer.duplicate();
+        tempBuffer.order(buffer.order());
+
+        VarInt.DecodeResult lengthResult = VarInt.decode(tempBuffer);
+        int numElements = lengthResult.getValue();
+        int varIntLength = tempBuffer.position() - initialPosition;
+
+        if (numElements == 0) {
+            if (buffer.remaining() < varIntLength) {
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
+                    "Not enough bytes for empty " + typeName + " VarInt. Needed: " + 
+                    varIntLength + ", available: " + buffer.remaining());
+            }
+            ByteBuffer valueSlice = buffer.slice();
+            valueSlice.limit(varIntLength);
+            buffer.position(initialPosition + varIntLength);
+            return valueSlice.asReadOnlyBuffer();
+        }
+
+        int dataLength = measurer.measureDataLength(tempBuffer, numElements);
+        int totalLength = varIntLength + dataLength;
+        
+        if (buffer.remaining() < totalLength) {
+            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
+                "Not enough bytes for " + typeName + " value. Needed: " + totalLength + 
+                ", available: " + buffer.remaining() + " at position " + initialPosition);
+        }
+        
+        ByteBuffer valueSlice = buffer.slice();
+        valueSlice.limit(totalLength);
+        buffer.position(initialPosition + totalLength);
+        return valueSlice.asReadOnlyBuffer();
+    }
+    
+    @FunctionalInterface
+    interface ComplexValueMeasurer {
+        int measureDataLength(ByteBuffer tempBuffer, int numElements) throws ImprintException;
+    }
+    
     // Static implementations for each type
     TypeHandler NULL = new TypeHandler() {
         @Override
@@ -392,47 +435,24 @@ public interface TypeHandler {
         
         @Override
         public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
-            int initialPosition = buffer.position();
-            ByteBuffer tempBuffer = buffer.duplicate();
-            tempBuffer.order(buffer.order());
-
-            VarInt.DecodeResult lengthResult = VarInt.decode(tempBuffer);
-            int numElements = lengthResult.getValue();
-            int varIntActualLength = tempBuffer.position() - initialPosition;
-
-            if (numElements == 0) {
-                if (buffer.remaining() < varIntActualLength) {
-                     throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for empty ARRAY VarInt. Needed: " + varIntActualLength + ", available: " + buffer.remaining());
+            return readComplexValueBytes(buffer, "ARRAY", (tempBuffer, numElements) -> {
+                if (tempBuffer.remaining() < 1) {
+                    throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
+                        "Not enough bytes for ARRAY element type code in temp buffer during measurement.");
                 }
-                ByteBuffer valueSlice = buffer.slice();
-                valueSlice.limit(varIntActualLength);
-                buffer.position(initialPosition + varIntActualLength); 
-                return valueSlice.asReadOnlyBuffer();
-            }
+                byte elementTypeCodeByte = tempBuffer.get();
+                int typeCodeLength = 1;
 
-            if (tempBuffer.remaining() < 1) {
-                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for ARRAY element type code in temp buffer during measurement.");
-            }
-            byte elementTypeCodeByte = tempBuffer.get();
-            int typeCodeLength = 1;
-
-            TypeHandler elementHandler = TypeCode.fromByte(elementTypeCodeByte).getHandler();
-            int elementsDataTotalLength = 0;
-            for (int i = 0; i < numElements; i++) {
-                int elementStartPosInTemp = tempBuffer.position();
-                elementHandler.readValueBytes(tempBuffer);
-                elementsDataTotalLength += (tempBuffer.position() - elementStartPosInTemp);
-            }
-            
-            int totalValueLength = varIntActualLength + typeCodeLength + elementsDataTotalLength;
-            
-            if (buffer.remaining() < totalValueLength) {
-                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for ARRAY value. Needed: " + totalValueLength + ", available: " + buffer.remaining() + " at position " + initialPosition);
-            }
-            ByteBuffer valueSlice = buffer.slice();
-            valueSlice.limit(totalValueLength);
-            buffer.position(initialPosition + totalValueLength); 
-            return valueSlice.asReadOnlyBuffer();
+                TypeHandler elementHandler = TypeCode.fromByte(elementTypeCodeByte).getHandler();
+                int elementsDataLength = 0;
+                for (int i = 0; i < numElements; i++) {
+                    int elementStartPos = tempBuffer.position();
+                    elementHandler.readValueBytes(tempBuffer);
+                    elementsDataLength += (tempBuffer.position() - elementStartPos);
+                }
+                
+                return typeCodeLength + elementsDataLength;
+            });
         }
     };
     
@@ -531,51 +551,24 @@ public interface TypeHandler {
         
         @Override
         public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
-            int initialPosition = buffer.position();
-            ByteBuffer tempBuffer = buffer.duplicate();
-            tempBuffer.order(buffer.order());
-
-            VarInt.DecodeResult lengthResult = VarInt.decode(tempBuffer);
-            int numEntries = lengthResult.getValue();
-            int varIntActualLength = tempBuffer.position() - initialPosition;
-
-            if (numEntries == 0) {
-                 if (buffer.remaining() < varIntActualLength) {
-                     throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for empty MAP VarInt. Needed: " + varIntActualLength + ", available: " + buffer.remaining());
+            return readComplexValueBytes(buffer, "MAP", (tempBuffer, numEntries) -> {
+                if (tempBuffer.remaining() < 2) {
+                    throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
+                        "Not enough bytes for MAP key/value type codes in temp buffer during measurement.");
                 }
-                ByteBuffer valueSlice = buffer.slice();
-                valueSlice.limit(varIntActualLength);
-                buffer.position(initialPosition + varIntActualLength);
-                return valueSlice.asReadOnlyBuffer();
-            }
+                byte keyTypeCodeByte = tempBuffer.get();
+                byte valueTypeCodeByte = tempBuffer.get();
+                int typeCodesLength = 2;
+                int entriesDataLength = 0;
+                for (int i = 0; i < numEntries; i++) {
+                    int entryStartPos = tempBuffer.position();
+                    TypeCode.fromByte(keyTypeCodeByte).getHandler().readValueBytes(tempBuffer);
+                    TypeCode.fromByte(valueTypeCodeByte).getHandler().readValueBytes(tempBuffer);
+                    entriesDataLength += (tempBuffer.position() - entryStartPos);
+                }
 
-            if (tempBuffer.remaining() < 2) {
-                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for MAP key/value type codes in temp buffer during measurement.");
-            }
-            byte keyTypeCodeByte = tempBuffer.get();
-            byte valueTypeCodeByte = tempBuffer.get();
-            int typeCodesLength = 2;
-
-            TypeHandler keyHandler = TypeCode.fromByte(keyTypeCodeByte).getHandler();
-            TypeHandler valueHandler = TypeCode.fromByte(valueTypeCodeByte).getHandler();
-            
-            int entriesDataTotalLength = 0;
-            for (int i = 0; i < numEntries; i++) {
-                int entryStartPosInTemp = tempBuffer.position();
-                keyHandler.readValueBytes(tempBuffer);
-                valueHandler.readValueBytes(tempBuffer);
-                entriesDataTotalLength += (tempBuffer.position() - entryStartPosInTemp);
-            }
-
-            int totalValueLength = varIntActualLength + typeCodesLength + entriesDataTotalLength;
-
-            if (buffer.remaining() < totalValueLength) {
-                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for MAP value. Needed: " + totalValueLength + ", available: " + buffer.remaining() + " at position " + initialPosition);
-            }
-            ByteBuffer valueSlice = buffer.slice();
-            valueSlice.limit(totalValueLength);
-            buffer.position(initialPosition + totalValueLength);
-            return valueSlice.asReadOnlyBuffer();
+                return typeCodesLength + entriesDataLength;
+            });
         }
         
         private void serializeMapKey(MapKey key, ByteBuffer buffer) throws ImprintException {
