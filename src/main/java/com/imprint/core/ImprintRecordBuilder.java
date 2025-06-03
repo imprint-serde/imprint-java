@@ -10,11 +10,16 @@ import java.util.*;
  * A fluent builder for creating ImprintRecord instances with type-safe, 
  * developer-friendly API that eliminates boilerplate Value.fromX() calls.
  * <p>
+ * Field IDs can be overwritten - calling field() with the same ID multiple times
+ * will replace the previous value. This allows for flexible builder patterns and
+ * conditional field updates.
+ * <p>
  * Usage:
  * <pre>
  *   var record = ImprintRecord.builder(schemaId)
  *       .field(1, 42)              // int to Int32Value  
  *       .field(2, "hello")         // String to StringValue
+ *       .field(1, 100)             // overwrites field 1 with new value
  *       .field(3, 3.14)            // double to Float64Value
  *       .field(4, bytes)           // byte[] to BytesValue
  *       .field(5, true)            // boolean to BoolValue
@@ -22,6 +27,7 @@ import java.util.*;
  *       .build();
  * </pre>
  */
+@SuppressWarnings("unused")
 public final class ImprintRecordBuilder {
     private final SchemaId schemaId;
     private final Map<Integer, Value> fields = new TreeMap<>();
@@ -141,12 +147,17 @@ public final class ImprintRecordBuilder {
     }
     
     // Internal helper methods
+    /**
+     * Adds or overwrites a field in the record being built.
+     * If a field with the given ID already exists, it will be replaced.
+     * 
+     * @param id the field ID
+     * @param value the field value (cannot be null - use nullField() for explicit nulls)
+     * @return this builder for method chaining
+     */
     private ImprintRecordBuilder addField(int id, Value value) {
         Objects.requireNonNull(value, "Value cannot be null - use nullField() for explicit null values");
-        if (fields.containsKey(id)) {
-            throw new IllegalArgumentException("Field ID " + id + " already exists - field IDs must be unique");
-        }
-        fields.put(id, value);
+        fields.put(id, value); // TreeMap.put() overwrites existing values
         return this;
     }
     

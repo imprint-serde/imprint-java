@@ -50,15 +50,15 @@ public class ProfilerTest {
             // Random field access (hotspot)
             int fieldId = random.nextInt(RECORD_SIZE) + 1;
             var value = record.getValue(fieldId);
-            if (value.isPresent()) {
+            if (value != null) {
                 hits++;
                 
                 // Trigger string decoding (potential hotspot)
-                if (value.get().getTypeCode() == com.imprint.types.TypeCode.STRING) {
-                    if (value.get() instanceof Value.StringBufferValue) {
-                        ((Value.StringBufferValue) value.get()).getValue();
+                if (value.getTypeCode() == com.imprint.types.TypeCode.STRING) {
+                    if (value instanceof Value.StringBufferValue) {
+                        ((Value.StringBufferValue) value).getValue();
                     } else {
-                        ((Value.StringValue) value.get()).getValue();
+                        ((Value.StringValue) value).getValue();
                     }
                 }
             }
@@ -123,11 +123,11 @@ public class ProfilerTest {
             // Project 10 fields out of 100 (common analytical pattern)
             for (int fieldId = 1; fieldId <= 10; fieldId++) {
                 var value = record.getValue(fieldId);
-                if (value.isPresent()) {
+                if (value != null) {
                     // Force materialization of string values
-                    if (value.get().getTypeCode() == com.imprint.types.TypeCode.STRING) {
-                        if (value.get() instanceof Value.StringBufferValue) {
-                            ((Value.StringBufferValue) value.get()).getValue();
+                    if (value.getTypeCode() == com.imprint.types.TypeCode.STRING) {
+                        if (value instanceof Value.StringBufferValue) {
+                            ((Value.StringBufferValue) value).getValue();
                         }
                     }
                 }

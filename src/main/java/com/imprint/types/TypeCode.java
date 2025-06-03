@@ -16,8 +16,8 @@ public enum TypeCode {
     FLOAT64(0x5, TypeHandler.FLOAT64),
     BYTES(0x6, TypeHandler.BYTES),
     STRING(0x7, TypeHandler.STRING),
-    ARRAY(0x8, null), // TODO: implement
-    MAP(0x9, null),   // TODO: implement
+    ARRAY(0x8, TypeHandler.ARRAY),
+    MAP(0x9, TypeHandler.MAP),
     ROW(0xA, null);   // TODO: implement (basically a placeholder for user-defined type)
     
     @Getter

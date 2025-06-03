@@ -105,6 +105,26 @@ public final class VarInt {
     }
     
     /**
+     * Read VarInt-prefixed data from a ByteBuffer.
+     * The data format is: VarInt(length) + data(length bytes).
+     * Returns a read-only ByteBuffer containing the entire VarInt + data.
+     * 
+     * @param buffer the buffer to read from
+     * @return a read-only ByteBuffer view of the VarInt + data
+     * @throws ImprintException if the VarInt is malformed or buffer underflow
+     */
+    public static ByteBuffer readVarIntPrefixedBytes(ByteBuffer buffer) throws ImprintException {
+        int originalPosition = buffer.position();
+        VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
+        int totalLength = lengthResult.getBytesRead() + lengthResult.getValue();
+        buffer.position(originalPosition);
+        var valueBuffer = buffer.slice();
+        valueBuffer.limit(totalLength);
+        buffer.position(buffer.position() + totalLength);
+        return valueBuffer.asReadOnlyBuffer();
+    }
+    
+    /**
      * Result of a VarInt decode operation.
      */
     @Getter
