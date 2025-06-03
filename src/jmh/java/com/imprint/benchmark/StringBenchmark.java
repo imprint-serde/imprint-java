@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 @Fork(1)
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
+@SuppressWarnings("unused")
 public class StringBenchmark {
     
     private static final SchemaId SCHEMA_ID = new SchemaId(1, 42);

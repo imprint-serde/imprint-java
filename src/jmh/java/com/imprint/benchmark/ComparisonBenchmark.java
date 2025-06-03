@@ -103,8 +103,6 @@ public class ComparisonBenchmark {
 
     // ===== FIELD ACCESS BENCHMARKS =====
     // Tests accessing a single field near the end of a large record
-    // This showcases Imprint's O(1) directory lookup vs sequential deserialization
-
     @Benchmark
     public void singleFieldAccessImprint(Blackhole bh) throws Exception {
         ImprintRecord record = ImprintRecord.deserialize(imprintBytes.duplicate());
@@ -158,11 +156,9 @@ public class ComparisonBenchmark {
 
     @Benchmark
     public void mergeImprint(Blackhole bh) throws Exception {
-        // Simulate merge with Imprint (O(1) with proper API)
         var record1 = serializeWithImprint(testData);
         var record2 = serializeWithImprint(createTestRecord2());
-        
-        // Current simulation - will be O(1) with actual merge API
+
         var deserialized1 = ImprintRecord.deserialize(record1);
         var deserialized2 = ImprintRecord.deserialize(record2);
         var merged = simulateMerge(deserialized1, deserialized2);
