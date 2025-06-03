@@ -41,23 +41,16 @@ public final class ImprintRecord {
     /**
      * Get a value by field ID, deserializing it on demand.
      * Returns null if the field is not found.
-     * Note: If the field exists and is an explicit NULL type, this will return Value.NullValue.INSTANCE.
+     * Note: If the field exists and is an explicit NULL type, this will return Value.NullValue.INSTANCE
      */
     public Value getValue(int fieldId) throws ImprintException {
         var fieldBuffer = getFieldBuffer(fieldId);
         if (fieldBuffer == null) {
-            // If getFieldBuffer returns null, it means the fieldId was not in the directory,
-            // or an issue occurred slicing the payload (e.g., bad offsets).
             return null;
         }
 
-        // findDirectoryIndex should not be negative here if fieldBuffer is not null,
-        // but a defensive check or ensuring findDirectoryIndex is called once is good.
-        // For simplicity, assume getFieldBuffer implies a valid index.
         int directoryIndex = findDirectoryIndex(fieldId);
         if (directoryIndex < 0) {
-            // This case should ideally be caught by getFieldBuffer returning null.
-            // If it happens, indicates an inconsistency.
             throw new ImprintException(ErrorType.INTERNAL_ERROR, "Field ID " + fieldId + " found buffer but not in directory.");
         }
         var entry = directory.get(directoryIndex);
@@ -293,7 +286,7 @@ public final class ImprintRecord {
     }
 
     private <T extends Value> T getTypedValueOrThrow(int fieldId, TypeCode expectedTypeCode, Class<T> expectedValueClass, String expectedTypeName) throws ImprintException {
-        Value value = getValue(fieldId);
+        var value = getValue(fieldId);
 
         if (value == null) {
             throw new ImprintException(ErrorType.FIELD_NOT_FOUND,
