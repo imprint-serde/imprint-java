@@ -34,20 +34,20 @@ class ImprintRecordTest {
         assertThat(record.getHeader().getSchemaId()).isEqualTo(schemaId);
         assertThat(record.getDirectory()).hasSize(2);
         
-        Optional<Value> field1 = record.getValue(1);
-        Optional<Value> field2 = record.getValue(2);
+        Value field1 = record.getValue(1);
+        Value field2 = record.getValue(2);
         
-        assertThat(field1).isPresent();
-        assertThat(field1.get()).isInstanceOf(Value.Int32Value.class);
-        assertThat(((Value.Int32Value) field1.get()).getValue()).isEqualTo(42);
+        assertThat(field1).isNotNull();
+        assertThat(field1).isInstanceOf(Value.Int32Value.class);
+        assertThat(((Value.Int32Value) field1).getValue()).isEqualTo(42);
         
-        assertThat(field2).isPresent();
-        assertThat(field2.get().getTypeCode()).isEqualTo(com.imprint.types.TypeCode.STRING);
-        String stringValue = getStringValue(field2.get());
+        assertThat(field2).isNotNull();
+        assertThat(field2.getTypeCode()).isEqualTo(com.imprint.types.TypeCode.STRING);
+        String stringValue = getStringValue(field2);
         assertThat(stringValue).isEqualTo("hello");
         
-        // Non-existent field should return empty
-        assertThat(record.getValue(999)).isEmpty();
+        // Non-existent field should return null
+        assertThat(record.getValue(999)).isNull();
     }
     
     @Test
@@ -73,22 +73,22 @@ class ImprintRecordTest {
         var deserialized = ImprintRecord.deserialize(serialized);
         
         // Verify metadata
-        assertThat(deserialized.getHeader().getSchemaId().getFieldspaceId()).isEqualTo(1);
+        assertThat(deserialized.getHeader().getSchemaId().getFieldSpaceId()).isEqualTo(1);
         assertThat(deserialized.getHeader().getSchemaId().getSchemaHash()).isEqualTo(0xdeadbeef);
         assertThat(deserialized.getDirectory()).hasSize(8);
         
         // Verify all values
-        assertThat(deserialized.getValue(1)).contains(Value.nullValue());
-        assertThat(deserialized.getValue(2)).contains(Value.fromBoolean(true));
-        assertThat(deserialized.getValue(3)).contains(Value.fromInt32(42));
-        assertThat(deserialized.getValue(4)).contains(Value.fromInt64(123456789L));
-        assertThat(deserialized.getValue(5)).contains(Value.fromFloat32(3.14f));
-        assertThat(deserialized.getValue(6)).contains(Value.fromFloat64(2.718281828));
-        assertThat(deserialized.getValue(7)).contains(Value.fromBytes(new byte[]{1, 2, 3, 4}));
-        assertThat(deserialized.getValue(8)).contains(Value.fromString("test string"));
+        assertThat(deserialized.getValue(1)).isEqualTo(Value.nullValue());
+        assertThat(deserialized.getValue(2)).isEqualTo(Value.fromBoolean(true));
+        assertThat(deserialized.getValue(3)).isEqualTo(Value.fromInt32(42));
+        assertThat(deserialized.getValue(4)).isEqualTo(Value.fromInt64(123456789L));
+        assertThat(deserialized.getValue(5)).isEqualTo(Value.fromFloat32(3.14f));
+        assertThat(deserialized.getValue(6)).isEqualTo(Value.fromFloat64(2.718281828));
+        assertThat(deserialized.getValue(7)).isEqualTo(Value.fromBytes(new byte[]{1, 2, 3, 4}));
+        assertThat(deserialized.getValue(8)).isEqualTo(Value.fromString("test string"));
         
         // Non-existent field
-        assertThat(deserialized.getValue(999)).isEmpty();
+        assertThat(deserialized.getValue(999)).isNull();
     }
     
     @Test
@@ -111,11 +111,11 @@ class ImprintRecordTest {
         buffer.get(serialized);
         var deserialized = ImprintRecord.deserialize(serialized);
         
-        Optional<Value> arrayValue = deserialized.getValue(1);
-        assertThat(arrayValue).isPresent();
-        assertThat(arrayValue.get()).isInstanceOf(Value.ArrayValue.class);
+        Value arrayValue = deserialized.getValue(1);
+        assertThat(arrayValue).isNotNull();
+        assertThat(arrayValue).isInstanceOf(Value.ArrayValue.class);
         
-        List<Value> deserializedArray = ((Value.ArrayValue) arrayValue.get()).getValue();
+        List<Value> deserializedArray = ((Value.ArrayValue) arrayValue).getValue();
         assertThat(deserializedArray).hasSize(3);
         assertThat(deserializedArray.get(0)).isEqualTo(Value.fromInt32(1));
         assertThat(deserializedArray.get(1)).isEqualTo(Value.fromInt32(2));
@@ -140,11 +140,11 @@ class ImprintRecordTest {
         buffer.get(serialized);
         var deserialized = ImprintRecord.deserialize(serialized);
         
-        Optional<Value> mapValue = deserialized.getValue(1);
-        assertThat(mapValue).isPresent();
-        assertThat(mapValue.get()).isInstanceOf(Value.MapValue.class);
+        Value mapValue = deserialized.getValue(1);
+        assertThat(mapValue).isNotNull();
+        assertThat(mapValue).isInstanceOf(Value.MapValue.class);
         
-        Map<MapKey, Value> deserializedMap = ((Value.MapValue) mapValue.get()).getValue();
+        Map<MapKey, Value> deserializedMap = ((Value.MapValue) mapValue).getValue();
         assertThat(deserializedMap).hasSize(2);
         assertThat(deserializedMap.get(MapKey.fromString("key1"))).isEqualTo(Value.fromInt32(1));
         assertThat(deserializedMap.get(MapKey.fromString("key2"))).isEqualTo(Value.fromInt32(2));
@@ -173,23 +173,23 @@ class ImprintRecordTest {
         var deserialized = ImprintRecord.deserialize(serialized);
         
         // Verify outer record metadata
-        assertThat(deserialized.getHeader().getSchemaId().getFieldspaceId()).isEqualTo(1);
+        assertThat(deserialized.getHeader().getSchemaId().getFieldSpaceId()).isEqualTo(1);
         assertThat(deserialized.getHeader().getSchemaId().getSchemaHash()).isEqualTo(0xdeadbeef);
         
         // Verify nested record
-        Optional<Value> rowValue = deserialized.getValue(1);
-        assertThat(rowValue).isPresent();
-        assertThat(rowValue.get()).isInstanceOf(Value.RowValue.class);
+        Value rowValue = deserialized.getValue(1);
+        assertThat(rowValue).isNotNull();
+        assertThat(rowValue).isInstanceOf(Value.RowValue.class);
 
-        var nestedRecord = ((Value.RowValue) rowValue.get()).getValue();
-        assertThat(nestedRecord.getHeader().getSchemaId().getFieldspaceId()).isEqualTo(2);
+        var nestedRecord = ((Value.RowValue) rowValue).getValue();
+        assertThat(nestedRecord.getHeader().getSchemaId().getFieldSpaceId()).isEqualTo(2);
         assertThat(nestedRecord.getHeader().getSchemaId().getSchemaHash()).isEqualTo(0xcafebabe);
         
-        assertThat(nestedRecord.getValue(1)).contains(Value.fromInt32(42));
-        assertThat(nestedRecord.getValue(2)).contains(Value.fromString("nested"));
+        assertThat(nestedRecord.getValue(1)).isEqualTo(Value.fromInt32(42));
+        assertThat(nestedRecord.getValue(2)).isEqualTo(Value.fromString("nested"));
         
         // Verify outer record field
-        assertThat(deserialized.getValue(2)).contains(Value.fromInt64(123L));
+        assertThat(deserialized.getValue(2)).isEqualTo(Value.fromInt64(123L));
     }
     
     @Test
@@ -227,6 +227,6 @@ class ImprintRecordTest {
         var record = writer.build();
         
         assertThat(record.getDirectory()).hasSize(1);
-        assertThat(record.getValue(1)).contains(Value.fromInt32(43));
+        assertThat(record.getValue(1)).isEqualTo(Value.fromInt32(43));
     }
 }

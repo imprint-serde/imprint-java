@@ -39,10 +39,10 @@ public class IntegrationTest {
         ImprintRecord record = writer.build();
         
         // Verify we can read values back
-        assert record.getValue(1).get().equals(Value.fromInt32(42));
-        assert record.getValue(2).get().equals(Value.fromString("testing java imprint spec"));
-        assert record.getValue(3).get().equals(Value.fromBoolean(true));
-        assert record.getValue(999).isEmpty(); // non-existent field
+        assert Objects.equals(record.getValue(1), Value.fromInt32(42));
+        assert Objects.equals(record.getValue(2), Value.fromString("testing java imprint spec"));
+        assert Objects.equals(record.getValue(3), Value.fromBoolean(true));
+        assert record.getValue(999) == null; // non-existent field
         
         // Test serialization round-trip
         var buffer = record.serializeToBuffer();
@@ -50,11 +50,11 @@ public class IntegrationTest {
         buffer.get(serialized);
         ImprintRecord deserialized = ImprintRecord.deserialize(serialized);
         
-        assert deserialized.getValue(1).get().equals(Value.fromInt32(42));
-        assert deserialized.getValue(2).get().equals(Value.fromString("testing java imprint spec"));
-        assert deserialized.getValue(3).get().equals(Value.fromBoolean(true));
+        assert Objects.equals(deserialized.getValue(1), Value.fromInt32(42));
+        assert Objects.equals(deserialized.getValue(2), Value.fromString("testing java imprint spec"));
+        assert Objects.equals(deserialized.getValue(3), Value.fromBoolean(true));
         
-        System.out.println("✓ Basic functionality test passed");
+        System.out.println("Basic functionality test passed");
     }
     
     static void testArraysAndMaps() throws ImprintException {
@@ -87,14 +87,14 @@ public class IntegrationTest {
         ImprintRecord deserialized = ImprintRecord.deserialize(serialized);
         
         // Verify array
-        Value arrayValue = deserialized.getValue(1).get();
+        Value arrayValue = deserialized.getValue(1);
         assert arrayValue instanceof Value.ArrayValue;
         List<Value> deserializedArray = ((Value.ArrayValue) arrayValue).getValue();
         assert deserializedArray.size() == 3;
         assert deserializedArray.get(0).equals(Value.fromInt32(1));
         
         // Verify map
-        Value mapValue = deserialized.getValue(2).get();
+        Value mapValue = deserialized.getValue(2);
         assert mapValue instanceof Value.MapValue;
         Map<MapKey, Value> deserializedMap = ((Value.MapValue) mapValue).getValue();
         assert deserializedMap.size() == 2;
@@ -127,17 +127,17 @@ public class IntegrationTest {
         ImprintRecord deserialized = ImprintRecord.deserialize(serialized);
         
         // Verify outer record
-        assert deserialized.getHeader().getSchemaId().getFieldspaceId() == 4;
-        assert deserialized.getValue(2).get().equals(Value.fromString("outer data"));
+        assert deserialized.getHeader().getSchemaId().getFieldSpaceId() == 4;
+        assert Objects.equals(deserialized.getValue(2), Value.fromString("outer data"));
         
         // Verify nested record
-        Value rowValue = deserialized.getValue(1).get();
+        Value rowValue = deserialized.getValue(1);
         assert rowValue instanceof Value.RowValue;
         ImprintRecord nestedRecord = ((Value.RowValue) rowValue).getValue();
         
-        assert nestedRecord.getHeader().getSchemaId().getFieldspaceId() == 3;
-        assert nestedRecord.getValue(1).get().equals(Value.fromString("nested data"));
-        assert nestedRecord.getValue(2).get().equals(Value.fromInt64(9876543210L));
+        assert nestedRecord.getHeader().getSchemaId().getFieldSpaceId() == 3;
+        assert Objects.equals(nestedRecord.getValue(1), Value.fromString("nested data"));
+        assert Objects.equals(nestedRecord.getValue(2), Value.fromInt64(9876543210L));
         
         System.out.println("✓ Nested records test passed");
     }
