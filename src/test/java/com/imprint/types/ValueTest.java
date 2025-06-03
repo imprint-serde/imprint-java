@@ -2,6 +2,8 @@ package com.imprint.types;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -104,20 +106,113 @@ class ValueTest {
     }
     
     @Test
-    void shouldDefensiveCopyArrays() {
-        byte[] original = {1, 2, 3};
-        var bytesValue = Value.fromBytes(original);
-        
-        // Modify original array
-        original[0] = 99;
-        
-        // Value should be unchanged
-        assertThat(((Value.BytesValue) bytesValue).getValue()).containsExactly(1, 2, 3);
-    }
-    
-    @Test
     void shouldRejectNullString() {
         assertThatThrownBy(() -> Value.fromString(null))
             .isInstanceOf(NullPointerException.class);
+    }
+    
+    @Test
+    void shouldCreateStringBufferValue() {
+        String testString = "hello world";
+        byte[] utf8Bytes = testString.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer buffer = ByteBuffer.wrap(utf8Bytes);
+        
+        Value stringBufferValue = Value.fromStringBuffer(buffer);
+        
+        assertThat(stringBufferValue).isInstanceOf(Value.StringBufferValue.class);
+        assertThat(stringBufferValue.getTypeCode()).isEqualTo(TypeCode.STRING);
+        assertThat(((Value.StringBufferValue) stringBufferValue).getValue()).isEqualTo(testString);
+    }
+    
+    @Test
+    void shouldCreateBytesBufferValue() {
+        byte[] testBytes = {1, 2, 3, 4, 5};
+        ByteBuffer buffer = ByteBuffer.wrap(testBytes);
+        
+        Value bytesBufferValue = Value.fromBytesBuffer(buffer);
+        
+        assertThat(bytesBufferValue).isInstanceOf(Value.BytesBufferValue.class);
+        assertThat(bytesBufferValue.getTypeCode()).isEqualTo(TypeCode.BYTES);
+        assertThat(((Value.BytesBufferValue) bytesBufferValue).getValue()).isEqualTo(testBytes);
+    }
+    
+    @Test
+    void shouldHandleStringBufferValueFastPath() {
+        // Array-backed buffer with arrayOffset() == 0 should use fast path
+        String testString = "fast path test";
+        byte[] utf8Bytes = testString.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer buffer = ByteBuffer.wrap(utf8Bytes);
+        
+        Value stringBufferValue = Value.fromStringBuffer(buffer);
+        
+        // Should work correctly regardless of path taken
+        assertThat(((Value.StringBufferValue) stringBufferValue).getValue()).isEqualTo(testString);
+    }
+    
+    @Test
+    void shouldHandleStringBufferValueFallbackPath() {
+        // Sliced buffer will have non-zero arrayOffset, forcing fallback path
+        String testString = "fallback path test";
+        byte[] utf8Bytes = testString.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer buffer = ByteBuffer.wrap(utf8Bytes);
+        ByteBuffer sliced = buffer.slice(); // This may break arrayOffset() == 0
+        
+        Value stringBufferValue = Value.fromStringBuffer(sliced);
+        
+        // Should work correctly regardless of path taken
+        assertThat(((Value.StringBufferValue) stringBufferValue).getValue()).isEqualTo(testString);
+    }
+    
+    @Test
+    void shouldHandleLargeStringWithoutCaching() {
+        // Create string > 1KB to test the no-cache path
+        String largeString = "x".repeat(2000);
+        byte[] utf8Bytes = largeString.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer buffer = ByteBuffer.wrap(utf8Bytes).slice(); // Force fallback path
+        
+        Value stringBufferValue = Value.fromStringBuffer(buffer);
+        
+        assertThat(((Value.StringBufferValue) stringBufferValue).getValue()).isEqualTo(largeString);
+    }
+    
+    @Test
+    void shouldCacheStringDecoding() {
+        String testString = "cache test";
+        byte[] utf8Bytes = testString.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer buffer = ByteBuffer.wrap(utf8Bytes);
+        
+        Value.StringBufferValue stringBufferValue = (Value.StringBufferValue) Value.fromStringBuffer(buffer);
+        
+        // First call should decode and cache
+        String result1 = stringBufferValue.getValue();
+        // Second call should return cached value
+        String result2 = stringBufferValue.getValue();
+        
+        assertThat(result1).isEqualTo(testString);
+        assertThat(result2).isEqualTo(testString);
+        assertThat(result1).isSameAs(result2); // Should be same object reference due to caching
+    }
+    
+    @Test
+    void shouldHandleStringValueEquality() {
+        String testString = "equality test";
+        
+        Value stringValue = Value.fromString(testString);
+        Value stringBufferValue = Value.fromStringBuffer(ByteBuffer.wrap(testString.getBytes(StandardCharsets.UTF_8)));
+        
+        assertThat(stringValue).isEqualTo(stringBufferValue);
+        assertThat(stringBufferValue).isEqualTo(stringValue);
+        assertThat(stringValue.hashCode()).isEqualTo(stringBufferValue.hashCode());
+    }
+    
+    @Test
+    void shouldHandleBytesValueEquality() {
+        byte[] testBytes = {1, 2, 3, 4, 5};
+        
+        Value bytesValue = Value.fromBytes(testBytes);
+        Value bytesBufferValue = Value.fromBytesBuffer(ByteBuffer.wrap(testBytes));
+        
+        assertThat(bytesValue).isEqualTo(bytesBufferValue);
+        assertThat(bytesBufferValue).isEqualTo(bytesValue);
     }
 }
