@@ -292,12 +292,6 @@ public final class ImprintRecord {
         }
     }
 
-    @Override
-    public String toString() {
-        return String.format("ImprintRecord{header=%s, directorySize=%d, payloadSize=%d}",
-                header, directory.size(), payload.remaining());
-    }
-
     private <T extends Value> T getTypedValueOrThrow(int fieldId, TypeCode expectedTypeCode, Class<T> expectedValueClass, String expectedTypeName) throws ImprintException {
         Value value = getValue(fieldId);
 
@@ -439,4 +433,11 @@ public final class ImprintRecord {
     public ImprintRecord getRow(int fieldId) throws ImprintException {
         return getTypedValueOrThrow(fieldId, TypeCode.ROW, Value.RowValue.class, "ROW").getValue();
     }
+
+    @Override
+    public String toString() {
+        return String.format("ImprintRecord{header=%s, directorySize=%d, payloadSize=%d}",
+                header, directory.size(), payload.remaining());
+    }
+
 }
