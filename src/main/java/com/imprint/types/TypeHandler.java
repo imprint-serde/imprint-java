@@ -20,8 +20,7 @@ public interface TypeHandler {
     ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException;
     
     // Helper method to eliminate duplication in ARRAY/MAP readValueBytes
-    static ByteBuffer readComplexValueBytes(ByteBuffer buffer, String typeName, 
-                                           ComplexValueMeasurer measurer) throws ImprintException {
+    static ByteBuffer readComplexValueBytes(ByteBuffer buffer, String typeName, BufferViewer measurer) throws ImprintException {
         int initialPosition = buffer.position();
         ByteBuffer tempBuffer = buffer.duplicate();
         tempBuffer.order(buffer.order());
@@ -58,7 +57,7 @@ public interface TypeHandler {
     }
     
     @FunctionalInterface
-    interface ComplexValueMeasurer {
+    interface BufferViewer {
         int measureDataLength(ByteBuffer tempBuffer, int numElements) throws ImprintException;
     }
     
