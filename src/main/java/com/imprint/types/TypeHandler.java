@@ -19,6 +19,13 @@ public interface TypeHandler {
     int estimateSize(Value value) throws ImprintException;
     ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException;
     
+
+    
+    @FunctionalInterface
+    interface BufferViewer {
+        int measureDataLength(ByteBuffer tempBuffer, int numElements) throws ImprintException;
+    }
+
     // Helper method to eliminate duplication in ARRAY/MAP readValueBytes
     static ByteBuffer readComplexValueBytes(ByteBuffer buffer, String typeName, BufferViewer measurer) throws ImprintException {
         int initialPosition = buffer.position();
@@ -31,9 +38,9 @@ public interface TypeHandler {
 
         if (numElements == 0) {
             if (buffer.remaining() < varIntLength) {
-                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
-                    "Not enough bytes for empty " + typeName + " VarInt. Needed: " + 
-                    varIntLength + ", available: " + buffer.remaining());
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
+                        "Not enough bytes for empty " + typeName + " VarInt. Needed: " +
+                                varIntLength + ", available: " + buffer.remaining());
             }
             ByteBuffer valueSlice = buffer.slice();
             valueSlice.limit(varIntLength);
@@ -43,22 +50,17 @@ public interface TypeHandler {
 
         int dataLength = measurer.measureDataLength(tempBuffer, numElements);
         int totalLength = varIntLength + dataLength;
-        
+
         if (buffer.remaining() < totalLength) {
-            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
-                "Not enough bytes for " + typeName + " value. Needed: " + totalLength + 
-                ", available: " + buffer.remaining() + " at position " + initialPosition);
+            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
+                    "Not enough bytes for " + typeName + " value. Needed: " + totalLength +
+                            ", available: " + buffer.remaining() + " at position " + initialPosition);
         }
-        
+
         ByteBuffer valueSlice = buffer.slice();
         valueSlice.limit(totalLength);
         buffer.position(initialPosition + totalLength);
         return valueSlice.asReadOnlyBuffer();
-    }
-    
-    @FunctionalInterface
-    interface BufferViewer {
-        int measureDataLength(ByteBuffer tempBuffer, int numElements) throws ImprintException;
     }
     
     // Static implementations for each type
