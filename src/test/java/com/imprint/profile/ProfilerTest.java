@@ -4,7 +4,6 @@ import com.imprint.core.ImprintRecord;
 import com.imprint.core.ImprintWriter;
 import com.imprint.core.SchemaId;
 import com.imprint.types.Value;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Random;
@@ -82,12 +81,12 @@ public class ProfilerTest {
         Thread.sleep(3000);
         
         var schemaId = new SchemaId(1, 0x12345678);
-
+        
         System.out.println("Beginning serialization profiling...");
         long start = System.nanoTime();
         
         // Create and serialize many records (allocation hotspot)
-        for (int i = 0; i < 500_000; i++) {
+        for (int i = 0; i < 100_000; i++) {
             var writer = new ImprintWriter(schemaId);
             
             // Add various field types
