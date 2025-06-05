@@ -192,11 +192,11 @@ public abstract class Value {
         private final byte[] value;
         
         public BytesValue(byte[] value) {
-            this.value = value.clone(); // defensive copy
+            this.value = value.clone();
         }
         
         public byte[] getValue() { 
-            return value.clone(); // defensive copy
+            return value.clone();
         }
         
         @Override
@@ -233,7 +233,7 @@ public abstract class Value {
         private final ByteBuffer value;
         
         public BytesBufferValue(ByteBuffer value) {
-            this.value = value.asReadOnlyBuffer(); // zero-copy read-only view
+            this.value = value.asReadOnlyBuffer();
         }
         
         public byte[] getValue() { 
@@ -244,7 +244,7 @@ public abstract class Value {
         }
         
         public ByteBuffer getBuffer() {
-            return value.duplicate(); // zero-copy view
+            return value.duplicate();
         }
         
         @Override
@@ -289,11 +289,11 @@ public abstract class Value {
         public byte[] getUtf8Bytes() {
             var cached = cachedUtf8Bytes;
             if (cached == null) {
-                // Multiple threads may compute this - that's OK since it's idempotent
+                // UTF8 is idempotent so no need to synchronize
                 cached = value.getBytes(StandardCharsets.UTF_8);
                 cachedUtf8Bytes = cached;
             }
-            return cached; // Return our computed value, not re-read from volatile field
+            return cached; // Return computed value
         }
 
         @Override
@@ -328,16 +328,19 @@ public abstract class Value {
     // String Value (ByteBuffer-based)
     public static class StringBufferValue extends Value {
         private final ByteBuffer value;
-        private volatile String cachedString; // lazy decode
+        private volatile String cachedString;
+
+        private static final int THREAD_LOCAL_BUFFER_SIZE = 1024;
+        private static final ThreadLocal<byte[]> DECODE_BUFFER_CACHE =
+                ThreadLocal.withInitial(() -> new byte[THREAD_LOCAL_BUFFER_SIZE]);
 
         public StringBufferValue(ByteBuffer value) {
-            this.value = value.asReadOnlyBuffer(); // zero-copy read-only view
+            this.value = value.asReadOnlyBuffer();
         }
 
         public String getValue() {
             String result = cachedString;
             if (result == null) {
-                // Simple, fast decoding - no thread-local overhead
                 result = decodeUtf8();
                 cachedString = result;
             }
@@ -345,22 +348,29 @@ public abstract class Value {
         }
 
         private String decodeUtf8() {
-            // Fast path: zero-copy for array-backed ByteBuffers
-            if (value.hasArray()) {
-                return new String(value.array(), value.arrayOffset() + value.position(),
-                        value.remaining(), StandardCharsets.UTF_8);
-            }
+            final byte[] array;
+            final int offset;
+            final int length = value.remaining();
 
-            // Fallback path for non-array-backed ByteBuffers (e.g., direct buffers).
-            // Allocation is required here as Java's String(byte[],...) constructor needs a heap array.
-            // Data is copied from the ByteBuffer to a new byte array.
-            var array = new byte[value.remaining()];
-            value.duplicate().get(array);
-            return new String(array, StandardCharsets.UTF_8);
+            if (value.hasArray()) {
+                array = value.array();
+                offset = value.arrayOffset() + value.position();
+            } else {
+                byte[] threadLocalBuffer = DECODE_BUFFER_CACHE.get();
+                if (length <= threadLocalBuffer.length) {
+                    array = threadLocalBuffer;
+                } else {
+                    // Fallback: copy bytes from the ByteBuffer to a new heap array (if too large for cache)
+                    array = new byte[length];
+                }
+                value.duplicate().get(array, 0, length);
+                offset = 0;
+            }
+            return new String(array, offset, length, StandardCharsets.UTF_8);
         }
 
         public ByteBuffer getBuffer() {
-            return value.duplicate(); // zero-copy view
+            return value.duplicate();
         }
 
         @Override

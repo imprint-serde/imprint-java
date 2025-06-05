@@ -2,6 +2,8 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'me.champeau.jmh' version '0.7.2'
+    id 'com.google.protobuf' version '0.9.4'
+    id 'io.netifi.flatbuffers' version '1.0.7'
 }
 
 group = 'com.imprint'
@@ -23,45 +25,290 @@ dependencies {
     // Lombok for reducing boilerplate
     compileOnly 'org.projectlombok:lombok:1.18.30'
     annotationProcessor 'org.projectlombok:lombok:1.18.30'
-    
+
     // Test dependencies
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
     testImplementation 'org.assertj:assertj-core:3.24.2'
     testImplementation 'org.mockito:mockito-core:5.5.0'
-    
+
     // Lombok for tests
     testCompileOnly 'org.projectlombok:lombok:1.18.30'
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
-    
+
     // Performance testing with JMH
     jmhImplementation 'org.openjdk.jmh:jmh-core:1.37'
     jmhAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
-    
-    // Competitor libraries for benchmarking
+
+    // Suppress SLF4J warnings
+    jmhImplementation 'org.slf4j:slf4j-nop:1.7.36'
+
+    // Competitor libraries for benchmarking (JMH only)
     jmhImplementation 'com.google.protobuf:protobuf-java:3.25.1'
     jmhImplementation 'org.apache.avro:avro:1.11.3'
     jmhImplementation 'com.fasterxml.jackson.core:jackson-databind:2.16.0'
     jmhImplementation 'com.google.flatbuffers:flatbuffers-java:23.5.26'
     jmhImplementation 'com.esotericsoftware:kryo:5.4.0'
+    jmhImplementation 'org.msgpack:msgpack-core:0.9.8'
+    jmhImplementation 'org.msgpack:jackson-dataformat-msgpack:0.9.8'
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:3.25.1"
+    }
+    generateProtoTasks {
+        // Only generate for JMH, not main
+        all().each { task ->
+            task.enabled = false
+        }
+        ofSourceSet('jmh').each { task ->
+            task.enabled = true
+            task.builtins {
+                java {
+                    outputSubDir = 'java'
+                }
+            }
+        }
+    }
+}
+
+// Download and setup FlatBuffers compiler for Linux (CI environment)
+tasks.register('downloadFlatc') {
+    description = 'Download FlatBuffers compiler'
+    group = 'build setup'
+
+    def flatcDir = file("${buildDir}/flatc")
+    def flatcExe = file("${flatcDir}/flatc")
+    def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+    def flatcUrl = isWindows ?
+            "https://github.com/google/flatbuffers/releases/download/v23.5.26/Windows.flatc.binary.zip" :
+            "https://github.com/google/flatbuffers/releases/download/v23.5.26/Linux.flatc.binary.clang++-12.zip"
+    def flatcZip = file("${buildDir}/flatc.zip")
+
+    outputs.file(flatcExe)
+
+    doLast {
+        if (!flatcExe.exists()) {
+            println "Downloading FlatBuffers compiler for ${isWindows ? 'Windows' : 'Linux'}..."
+            flatcDir.mkdirs()
+
+            // Download
+            new URL(flatcUrl).withInputStream { i ->
+                flatcZip.withOutputStream { it << i }
+            }
+
+            // Extract
+            copy {
+                from zipTree(flatcZip)
+                into flatcDir
+            }
+
+            // Make executable on Unix systems
+            if (!isWindows) {
+                exec {
+                    commandLine 'chmod', '+x', flatcExe.absolutePath
+                }
+            }
+
+            flatcZip.delete()
+            println "FlatBuffers compiler downloaded to: ${flatcExe}"
+        }
+    }
+}
+
+// Generate FlatBuffers sources
+tasks.register('generateFlatBuffers', Exec) {
+    dependsOn downloadFlatc
+    description = 'Generate Java classes from FlatBuffers schema'
+    group = 'build'
+
+    def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+    def flatcExe = file("${buildDir}/flatc/${isWindows ? 'flatc.exe' : 'flatc'}")
+    def schemaFile = file('src/jmh/flatbuffers/test_record.fbs')
+    def outputDir = file('build/generated/source/flatbuffers/jmh/java')
+
+    commandLine flatcExe.absolutePath, '--java', '-o', outputDir.absolutePath, schemaFile.absolutePath
+
+    inputs.file(schemaFile)
+    outputs.dir(outputDir)
+
+    doFirst {
+        outputDir.mkdirs()
+    }
+}
+
+// Add generated FlatBuffers sources to JMH source set
+sourceSets {
+    jmh {
+        java {
+            srcDir 'build/generated/source/flatbuffers/jmh/java'
+        }
+        proto {
+            srcDir 'src/jmh/proto'
+        }
+    }
+}
+
+// Make JMH compilation depend on FlatBuffers generation
+compileJmhJava.dependsOn generateFlatBuffers
+
+// Handle duplicate proto files
+tasks.named('processJmhResources') {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 test {
     useJUnitPlatform()
-    
+
     // Enable detailed test output
     testLogging {
         events "passed", "skipped", "failed"
     }
 }
 
-// JMH configuration
+// JMH configuration - optimized for Java 11
 jmh {
     fork = 1
-    warmupIterations = 3
-    iterations = 3
+    warmupIterations = 2  // Reduced for faster CI
+    iterations = 3  // Reduced for faster CI
     resultFormat = 'JSON'
     includeTests = false
     resultsFile = file("${projectDir}/benchmark-results/jmh-results-${new Date().format('yyyy-MM-dd-HHmmss')}.json")
+
+    // Java 11 specific JVM args
+    jvmArgs = [
+            '-XX:+UseG1GC',
+            '-Xmx2g',
+            '-XX:+UnlockExperimentalVMOptions',
+            '-XX:+UseJVMCICompiler'
+    ]
+}
+
+// Create individual benchmark tasks for CI pipeline
+tasks.register('jmhRunSerializationBenchmarks', JavaExec) {
+    dependsOn compileJmhJava
+    description = 'Run serialization benchmarks'
+    group = 'benchmarking'
+
+    classpath = sourceSets.jmh.runtimeClasspath
+    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
+    args = ['runSerializationBenchmarks']
+
+    // Java 11 optimized JVM settings
+    jvmArgs = [
+            '-XX:+UseG1GC',
+            '-Xmx2g',
+            '-XX:+UnlockExperimentalVMOptions'
+    ]
+
+    doFirst {
+        file("${projectDir}/benchmark-results").mkdirs()
+    }
+}
+
+tasks.register('jmhRunDeserializationBenchmarks', JavaExec) {
+    dependsOn compileJmhJava
+    description = 'Run deserialization benchmarks'
+    group = 'benchmarking'
+
+    classpath = sourceSets.jmh.runtimeClasspath
+    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
+    args = ['runDeserializationBenchmarks']
+
+    // Java 11 optimized JVM settings
+    jvmArgs = [
+            '-XX:+UseG1GC',
+            '-Xmx2g',
+            '-XX:+UnlockExperimentalVMOptions'
+    ]
+
+    doFirst {
+        file("${projectDir}/benchmark-results").mkdirs()
+    }
+}
+
+tasks.register('jmhRunFieldAccessBenchmarks', JavaExec) {
+    dependsOn compileJmhJava
+    description = 'Run field access benchmarks'
+    group = 'benchmarking'
+
+    classpath = sourceSets.jmh.runtimeClasspath
+    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
+    args = ['runFieldAccessBenchmarks']
+
+    // Java 11 optimized JVM settings
+    jvmArgs = [
+            '-XX:+UseG1GC',
+            '-Xmx2g',
+            '-XX:+UnlockExperimentalVMOptions'
+    ]
+
+    doFirst {
+        file("${projectDir}/benchmark-results").mkdirs()
+    }
+}
+
+tasks.register('jmhRunSizeComparisonBenchmarks', JavaExec) {
+    dependsOn compileJmhJava
+    description = 'Run size comparison benchmarks'
+    group = 'benchmarking'
+
+    classpath = sourceSets.jmh.runtimeClasspath
+    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
+    args = ['runSizeComparisonBenchmarks']
+
+    // Java 11 optimized JVM settings
+    jvmArgs = [
+            '-XX:+UseG1GC',
+            '-Xmx2g',
+            '-XX:+UnlockExperimentalVMOptions'
+    ]
+
+    doFirst {
+        file("${projectDir}/benchmark-results").mkdirs()
+    }
+}
+
+tasks.register('jmhRunMergeBenchmarks', JavaExec) {
+    dependsOn compileJmhJava
+    description = 'Run merge operation benchmarks'
+    group = 'benchmarking'
+
+    classpath = sourceSets.jmh.runtimeClasspath
+    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
+    args = ['runMergeBenchmarks']
+
+    // Java 11 optimized JVM settings
+    jvmArgs = [
+            '-XX:+UseG1GC',
+            '-Xmx2g',
+            '-XX:+UnlockExperimentalVMOptions'
+    ]
+
+    doFirst {
+        file("${projectDir}/benchmark-results").mkdirs()
+    }
+}
+
+tasks.register('jmhRunAllBenchmarks', JavaExec) {
+    dependsOn compileJmhJava
+    description = 'Run all comparison benchmarks'
+    group = 'benchmarking'
+
+    classpath = sourceSets.jmh.runtimeClasspath
+    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
+    args = ['runAll']
+
+    // Java 11 optimized JVM settings
+    jvmArgs = [
+            '-XX:+UseG1GC',
+            '-Xmx2g',
+            '-XX:+UnlockExperimentalVMOptions'
+    ]
+
+    doFirst {
+        file("${projectDir}/benchmark-results").mkdirs()
+    }
 }
 
 compileJava {

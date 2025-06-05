@@ -34,7 +34,7 @@ public final class ImprintRecord {
      */
     public ImprintRecord(Header header, List<DirectoryEntry> directory, ByteBuffer payload) {
         this.header = Objects.requireNonNull(header, "Header cannot be null");
-        this.directory = List.copyOf(Objects.requireNonNull(directory, "Directory cannot be null"));
+        this.directory = Collections.unmodifiableList(Objects.requireNonNull(directory, "Directory cannot be null"));
         this.payload = payload.asReadOnlyBuffer(); // Zero-copy read-only view
     }
 
@@ -79,12 +79,14 @@ public final class ImprintRecord {
         int endOffset = (index + 1 < directory.size()) ?
                 directory.get(index + 1).getOffset() : payload.limit();
 
-        var fieldBuffer = payload.duplicate();
         if (startOffset > payload.limit() || endOffset > payload.limit() || startOffset > endOffset) {
             return null;
         }
+
+        //Single allocation instead of duplicate + slice
+        var fieldBuffer = payload.duplicate();
         fieldBuffer.position(startOffset).limit(endOffset);
-        return fieldBuffer.slice();
+        return fieldBuffer;
     }
 
     /**
@@ -261,7 +263,7 @@ public final class ImprintRecord {
     }
 
     private Value deserializeValue(TypeCode typeCode, ByteBuffer buffer) throws ImprintException {
-        ByteBuffer valueSpecificBuffer = buffer.duplicate();
+        var valueSpecificBuffer = buffer.duplicate();
         valueSpecificBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
         switch (typeCode) {
@@ -351,7 +353,7 @@ public final class ImprintRecord {
      * @throws ImprintException if the field is not found, is null, or is not of type STRING.
      */
     public String getString(int fieldId) throws ImprintException {
-        Value value = getValue(fieldId);
+        var value = getValue(fieldId);
 
         if (value == null) {
             throw new ImprintException(ErrorType.FIELD_NOT_FOUND,
