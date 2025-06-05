@@ -82,22 +82,22 @@ jobs:
 
       - name: Run serialization benchmarks
         run: |
-          ./gradlew jmh --include=".*serialize.*" --exclude=".*deserialize.*"
+          ./gradlew jmhRunSerializationBenchmarks
         continue-on-error: true
 
       - name: Run deserialization benchmarks
         run: |
-          ./gradlew jmh --include=".*deserialize.*"
+          ./gradlew jmhRunDeserializationBenchmarks
         continue-on-error: true
 
       - name: Run field access benchmarks
         run: |
-          ./gradlew jmh --include=".*singleFieldAccess.*"
+          ./gradlew jmhRunFieldAccessBenchmarks
         continue-on-error: true
 
       - name: Run size comparison benchmarks
         run: |
-          ./gradlew jmh --include=".*measure.*"
+          ./gradlew jmhRunSizeComparisonBenchmarks
         continue-on-error: true
 
       - name: Upload benchmark results
@@ -139,7 +139,7 @@ jobs:
               }
             
               if (latestFile) {
-                console.log(`Found benchmark results: ${latestFile}`);
+                console.log(`📊 Found benchmark results: ${latestFile}`);
                 const results = JSON.parse(fs.readFileSync(latestFile, 'utf8'));
             
                 // Group results by benchmark type
@@ -167,7 +167,7 @@ jobs:
                   return table;
                 };
             
-                const comment = `## Benchmark Results
+                const comment = `## 📊 Benchmark Results
             
               Benchmark comparison between Imprint and other serialization libraries:
               ${formatResults(serialization, 'Serialization Performance')}
@@ -191,20 +191,20 @@ jobs:
                   body: comment
                 });
             
-                console.log('Successfully posted benchmark results');
+                console.log('✅ Successfully posted benchmark results to PR');
               } else {
-                console.log('No benchmark results found');
+                console.log('⚠️ No benchmark results found');
                 await github.rest.issues.createComment({
                   issue_number: context.issue.number,
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  body: '## Benchmark Results\n\nBenchmark execution completed but no results file was found. Check the [workflow logs](' + 
+                  body: '## 📊 Benchmark Results\n\nBenchmark execution completed but no results file was found. Check the [workflow logs](' + 
                         `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` + ') for details.'
                 });
               }
             } catch (error) {
-              console.log('Failed to post benchmark comment:', error.message);
-              console.log('Benchmark results are still available in workflow artifacts');
+              console.log('❌ Failed to post benchmark comment:', error.message);
+              console.log('📁 Benchmark results are still available in workflow artifacts');
             
               // Try to post a simple error message
               try {
@@ -212,10 +212,10 @@ jobs:
                   issue_number: context.issue.number,
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  body: `## Benchmark Results\n\n Failed to process benchmark results automatically.\n\nResults are available in the [workflow artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`
+                  body: `## 📊 Benchmark Results\n\n⚠️ Failed to process benchmark results automatically.\n\nResults are available in the [workflow artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`
                 });
               } catch (commentError) {
-                console.log('Also failed to post error comment:', commentError.message);
+                console.log('❌ Also failed to post error comment:', commentError.message);
               }
             }
 
@@ -254,7 +254,7 @@ jobs:
 
       - name: Run full benchmark suite
         run: |
-          ./gradlew jmh
+          ./gradlew jmhRunAllBenchmarks
 
       - name: Upload full benchmark results
         uses: actions/upload-artifact@v4
