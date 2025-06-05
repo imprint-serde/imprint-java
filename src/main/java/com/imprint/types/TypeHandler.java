@@ -433,26 +433,38 @@ public interface TypeHandler {
             }
             return arraySize;
         }
-        
+
         @Override
         public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
             return readComplexValueBytes(buffer, "ARRAY", (tempBuffer, numElements) -> {
                 if (tempBuffer.remaining() < 1) {
-                    throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
-                        "Not enough bytes for ARRAY element type code in temp buffer during measurement.");
+                    throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
+                            "Not enough bytes for ARRAY element type code");
                 }
                 byte elementTypeCodeByte = tempBuffer.get();
-                int typeCodeLength = 1;
+                var elementType = TypeCode.fromByte(elementTypeCodeByte);
 
-                TypeHandler elementHandler = TypeCode.fromByte(elementTypeCodeByte).getHandler();
-                int elementsDataLength = 0;
-                for (int i = 0; i < numElements; i++) {
-                    int elementStartPos = tempBuffer.position();
-                    elementHandler.readValueBytes(tempBuffer);
-                    elementsDataLength += (tempBuffer.position() - elementStartPos);
+                switch (elementType) {
+                    case NULL:
+                        return 1;
+                    case BOOL:
+                        return 1 + numElements;
+                    case INT32:
+                    case FLOAT32:
+                        return 1 + (numElements * 4);
+                    case INT64:
+                    case FLOAT64:
+                        return 1 + (numElements * 8);
+                    default:
+                        var elementHandler = elementType.getHandler();
+                        int elementsDataLength = 0;
+                        for (int i = 0; i < numElements; i++) {
+                            int elementStartPos = tempBuffer.position();
+                            elementHandler.readValueBytes(tempBuffer);
+                            elementsDataLength += (tempBuffer.position() - elementStartPos);
+                        }
+                        return 1 + elementsDataLength;
                 }
-                
-                return typeCodeLength + elementsDataLength;
             });
         }
     };
@@ -549,28 +561,52 @@ public interface TypeHandler {
             }
             return mapSize;
         }
-        
+
         @Override
         public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
             return readComplexValueBytes(buffer, "MAP", (tempBuffer, numEntries) -> {
                 if (tempBuffer.remaining() < 2) {
-                    throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
-                        "Not enough bytes for MAP key/value type codes in temp buffer during measurement.");
+                    throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
+                            "Not enough bytes for MAP key/value type codes");
                 }
                 byte keyTypeCodeByte = tempBuffer.get();
                 byte valueTypeCodeByte = tempBuffer.get();
-                int typeCodesLength = 2;
-                int entriesDataLength = 0;
-                for (int i = 0; i < numEntries; i++) {
-                    int entryStartPos = tempBuffer.position();
-                    TypeCode.fromByte(keyTypeCodeByte).getHandler().readValueBytes(tempBuffer);
-                    TypeCode.fromByte(valueTypeCodeByte).getHandler().readValueBytes(tempBuffer);
-                    entriesDataLength += (tempBuffer.position() - entryStartPos);
-                }
+                TypeCode keyType = TypeCode.fromByte(keyTypeCodeByte);
+                TypeCode valueType = TypeCode.fromByte(valueTypeCodeByte);
 
-                return typeCodesLength + entriesDataLength;
+                // OPTIMIZATION: Calculate sizes directly for fixed-size types
+                int keySize = getFixedTypeSize(keyType);
+                int valueSize = getFixedTypeSize(valueType);
+
+                if (keySize > 0 && valueSize > 0) {
+                    // Both are fixed-size: O(1) calculation
+                    return 2 + (numEntries * (keySize + valueSize));
+                } else {
+                    // At least one is variable-size: fall back to traversal
+                    int entriesDataLength = 0;
+                    for (int i = 0; i < numEntries; i++) {
+                        int entryStartPos = tempBuffer.position();
+                        keyType.getHandler().readValueBytes(tempBuffer);
+                        valueType.getHandler().readValueBytes(tempBuffer);
+                        entriesDataLength += (tempBuffer.position() - entryStartPos);
+                    }
+                    return 2 + entriesDataLength;
+                }
             });
         }
+
+        private int getFixedTypeSize(TypeCode type) {
+            switch (type) {
+                case NULL: return 0;
+                case BOOL: return 1;
+                case INT32:
+                case FLOAT32: return 4;
+                case INT64:
+                case FLOAT64: return 8;
+                default: return -1; // Variable size
+            }
+        }
+
         
         private void serializeMapKey(MapKey key, ByteBuffer buffer) throws ImprintException {
             switch (key.getTypeCode()) {

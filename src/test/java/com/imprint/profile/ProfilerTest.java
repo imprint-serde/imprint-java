@@ -1,9 +1,10 @@
-package com.imprint.benchmark;
+package com.imprint.profile;
 
-import com.imprint.core.*;
+import com.imprint.core.ImprintRecord;
+import com.imprint.core.ImprintWriter;
+import com.imprint.core.SchemaId;
 import com.imprint.types.Value;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Disabled;
 
 import java.util.Random;
 
@@ -25,11 +26,11 @@ import java.util.Random;
  * - String operations and UTF-8 encoding
  * - ByteBuffer operations
  */
-@Disabled("Enable manually for profiling")
+//@Disabled("Enable manually for profiling")
 public class ProfilerTest {
     
     private static final int ITERATIONS = 1_000_000;
-    private static final int RECORD_SIZE = 20;
+    private static final int RECORD_SIZE = 50;
     
     @Test
     void profileFieldAccess() throws Exception {
