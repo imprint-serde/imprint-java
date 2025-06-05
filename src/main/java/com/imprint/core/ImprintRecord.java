@@ -83,7 +83,7 @@ public final class ImprintRecord {
             return null;
         }
 
-        // OPTIMIZATION: Single allocation instead of duplicate + slice
+        //Single allocation instead of duplicate + slice
         var fieldBuffer = payload.duplicate();
         fieldBuffer.position(startOffset).limit(endOffset);
         return fieldBuffer;
