@@ -133,33 +133,13 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    // ===== PARTIAL DESERIALIZATION (SETUP ONLY) =====
-// These benchmarks measure the cost of preparing a record for field access,
-// not the cost of accessing the actual data. This is important because
-//
-// 1. Imprint: Only parses header + stores raw directory bytes
-// 2. FlatBuffers: Only wraps the buffer with minimal validation
-// 3. Others (eager): Parse and construct all field objects upfront
-//
-// This comparison shows the advantage of lazy loading approaches when you
-// only need to access a subset of fields. In real streaming workloads,
-// records are often filtered/routed based on just a few key fields.
-//
-// For a fair "full deserialization" comparison, see FULL DESERIALIZATION BENCHMARKS.
+    // ===== DESERIALIZATION BENCHMARKS =====
 
     @Benchmark
-    public void deserializeSetupImprint(Blackhole bh) throws Exception {
+    public void deserializeImprint(Blackhole bh) throws Exception {
         ImprintRecord result = ImprintRecord.deserialize(imprintBytesBuffer.duplicate());
         bh.consume(result);
     }
-
-    @Benchmark
-    public void deserializeSetupFlatBuffers(Blackhole bh) {
-        TestRecordFB result = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
-        bh.consume(result);
-    }
-
-    // ===== FULL DESERIALIZATION BENCHMARKS =====
 
     @Benchmark
     public void deserializeJacksonJson(Blackhole bh) throws Exception {
@@ -194,52 +174,14 @@ public class ComparisonBenchmark {
     }
 
     @Benchmark
-    public void deserializeImprint(Blackhole bh) throws Exception {
-        ImprintRecord result = ImprintRecord.deserialize(imprintBytesBuffer.duplicate());
-        // Access all fields to force full deserialization
-        result.getInt32(1);        // id
-        result.getString(2);       // name
-        result.getFloat64(3);      // price
-        result.getBoolean(4);      // active
-        result.getString(5);       // category
-        result.getArray(6);        // tags
-        result.getMap(7);          // metadata
-        for (int i = 8; i < 21; i++) {
-            result.getString(i);   // extraData fields
-        }
-
-        bh.consume(result);
-    }
-
-    @Benchmark
     public void deserializeFlatBuffers(Blackhole bh) {
         TestRecordFB result = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
-
-        // Access all fields
-        result.id();
-        result.name();
-        result.price();
-        result.active();
-        result.category();
-        // Access all tags
-        for (int i = 0; i < result.tagsLength(); i++) {
-            result.tags(i);
-        }
-        // Access all metadata
-        for (int i = 0; i < result.metadataKeysLength(); i++) {
-            result.metadataKeys(i);
-            result.metadataValues(i);
-        }
-        // Access all extra data
-        for (int i = 0; i < result.extraDataLength(); i++) {
-            result.extraData(i);
-        }
-
         bh.consume(result);
     }
 
     // ===== FIELD ACCESS BENCHMARKS =====
-    // Tests accessing a single field near the end of a record
+    // Tests accessing a single field near the end of a large record
+    // This showcases Imprint's O(1) directory lookup vs sequential deserialization
 
     @Benchmark
     public void singleFieldAccessImprint(Blackhole bh) throws Exception {

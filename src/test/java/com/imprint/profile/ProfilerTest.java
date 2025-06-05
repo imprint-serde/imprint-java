@@ -4,7 +4,6 @@ import com.imprint.core.ImprintRecord;
 import com.imprint.core.ImprintWriter;
 import com.imprint.core.SchemaId;
 import com.imprint.types.Value;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Random;
@@ -27,7 +26,7 @@ import java.util.Random;
  * - String operations and UTF-8 encoding
  * - ByteBuffer operations
  */
-@Disabled("Enable manually for profiling")
+//@Disabled("Enable manually for profiling")
 public class ProfilerTest {
     
     private static final int ITERATIONS = 1_000_000;
