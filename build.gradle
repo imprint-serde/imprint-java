@@ -185,129 +185,177 @@ jmh {
 }
 
 // Create individual benchmark tasks for CI pipeline
-tasks.register('jmhRunSerializationBenchmarks', JavaExec) {
+tasks.register('jmhRunSerializationBenchmarks') {
     dependsOn compileJmhJava
     description = 'Run serialization benchmarks'
     group = 'benchmarking'
 
-    classpath = sourceSets.jmh.runtimeClasspath
-    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
-    args = ['runSerializationBenchmarks']
-
-    // Java 11 optimized JVM settings
-    jvmArgs = [
-            '-XX:+UseG1GC',
-            '-Xmx2g',
-            '-XX:+UnlockExperimentalVMOptions'
-    ]
-
     doFirst {
         file("${projectDir}/benchmark-results").mkdirs()
     }
+
+    doLast {
+        javaexec {
+            classpath = sourceSets.jmh.runtimeClasspath
+            mainClass = 'org.openjdk.jmh.Main'
+            args = [
+                    '.*serialize.*',
+                    '-f', '1',
+                    '-wi', '2',
+                    '-i', '3',
+                    '-rf', 'json',
+                    '-rff', "${projectDir}/benchmark-results/serialization-results.json"
+            ]
+            jvmArgs = [
+                    '-XX:+UseG1GC',
+                    '-Xmx2g'
+            ]
+        }
+    }
 }
 
-tasks.register('jmhRunDeserializationBenchmarks', JavaExec) {
+tasks.register('jmhRunDeserializationBenchmarks') {
     dependsOn compileJmhJava
     description = 'Run deserialization benchmarks'
     group = 'benchmarking'
 
-    classpath = sourceSets.jmh.runtimeClasspath
-    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
-    args = ['runDeserializationBenchmarks']
-
-    // Java 11 optimized JVM settings
-    jvmArgs = [
-            '-XX:+UseG1GC',
-            '-Xmx2g',
-            '-XX:+UnlockExperimentalVMOptions'
-    ]
-
     doFirst {
         file("${projectDir}/benchmark-results").mkdirs()
     }
+
+    doLast {
+        javaexec {
+            classpath = sourceSets.jmh.runtimeClasspath
+            mainClass = 'org.openjdk.jmh.Main'
+            args = [
+                    '.*deserialize.*',
+                    '-f', '1',
+                    '-wi', '2',
+                    '-i', '3',
+                    '-rf', 'json',
+                    '-rff', "${projectDir}/benchmark-results/deserialization-results.json"
+            ]
+            jvmArgs = [
+                    '-XX:+UseG1GC',
+                    '-Xmx2g'
+            ]
+        }
+    }
 }
 
-tasks.register('jmhRunFieldAccessBenchmarks', JavaExec) {
+tasks.register('jmhRunFieldAccessBenchmarks') {
     dependsOn compileJmhJava
     description = 'Run field access benchmarks'
     group = 'benchmarking'
 
-    classpath = sourceSets.jmh.runtimeClasspath
-    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
-    args = ['runFieldAccessBenchmarks']
-
-    // Java 11 optimized JVM settings
-    jvmArgs = [
-            '-XX:+UseG1GC',
-            '-Xmx2g',
-            '-XX:+UnlockExperimentalVMOptions'
-    ]
-
     doFirst {
         file("${projectDir}/benchmark-results").mkdirs()
     }
+
+    doLast {
+        javaexec {
+            classpath = sourceSets.jmh.runtimeClasspath
+            mainClass = 'org.openjdk.jmh.Main'
+            args = [
+                    '.*singleFieldAccess.*',
+                    '-f', '1',
+                    '-wi', '2',
+                    '-i', '3',
+                    '-rf', 'json',
+                    '-rff', "${projectDir}/benchmark-results/fieldaccess-results.json"
+            ]
+            jvmArgs = [
+                    '-XX:+UseG1GC',
+                    '-Xmx2g'
+            ]
+        }
+    }
 }
 
-tasks.register('jmhRunSizeComparisonBenchmarks', JavaExec) {
+tasks.register('jmhRunSizeComparisonBenchmarks') {
     dependsOn compileJmhJava
     description = 'Run size comparison benchmarks'
     group = 'benchmarking'
 
-    classpath = sourceSets.jmh.runtimeClasspath
-    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
-    args = ['runSizeComparisonBenchmarks']
-
-    // Java 11 optimized JVM settings
-    jvmArgs = [
-            '-XX:+UseG1GC',
-            '-Xmx2g',
-            '-XX:+UnlockExperimentalVMOptions'
-    ]
-
     doFirst {
         file("${projectDir}/benchmark-results").mkdirs()
     }
+
+    doLast {
+        javaexec {
+            classpath = sourceSets.jmh.runtimeClasspath
+            mainClass = 'org.openjdk.jmh.Main'
+            args = [
+                    '.*measure.*',
+                    '-f', '1',
+                    '-wi', '2',
+                    '-i', '3',
+                    '-rf', 'json',
+                    '-rff', "${projectDir}/benchmark-results/size-results.json"
+            ]
+            jvmArgs = [
+                    '-XX:+UseG1GC',
+                    '-Xmx2g'
+            ]
+        }
+    }
 }
 
-tasks.register('jmhRunMergeBenchmarks', JavaExec) {
+tasks.register('jmhRunMergeBenchmarks') {
     dependsOn compileJmhJava
     description = 'Run merge operation benchmarks'
     group = 'benchmarking'
 
-    classpath = sourceSets.jmh.runtimeClasspath
-    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
-    args = ['runMergeBenchmarks']
-
-    // Java 11 optimized JVM settings
-    jvmArgs = [
-            '-XX:+UseG1GC',
-            '-Xmx2g',
-            '-XX:+UnlockExperimentalVMOptions'
-    ]
-
     doFirst {
         file("${projectDir}/benchmark-results").mkdirs()
     }
+
+    doLast {
+        javaexec {
+            classpath = sourceSets.jmh.runtimeClasspath
+            mainClass = 'org.openjdk.jmh.Main'
+            args = [
+                    '.*merge.*',
+                    '-f', '1',
+                    '-wi', '2',
+                    '-i', '3',
+                    '-rf', 'json',
+                    '-rff', "${projectDir}/benchmark-results/merge-results.json"
+            ]
+            jvmArgs = [
+                    '-XX:+UseG1GC',
+                    '-Xmx2g'
+            ]
+        }
+    }
 }
 
-tasks.register('jmhRunAllBenchmarks', JavaExec) {
+tasks.register('jmhRunAllBenchmarks') {
     dependsOn compileJmhJava
     description = 'Run all comparison benchmarks'
     group = 'benchmarking'
 
-    classpath = sourceSets.jmh.runtimeClasspath
-    mainClass = 'com.imprint.benchmark.ComparisonBenchmark'
-    args = ['runAll']
-
-    // Java 11 optimized JVM settings
-    jvmArgs = [
-            '-XX:+UseG1GC',
-            '-Xmx2g',
-            '-XX:+UnlockExperimentalVMOptions'
-    ]
-
     doFirst {
         file("${projectDir}/benchmark-results").mkdirs()
+    }
+
+    doLast {
+        javaexec {
+            classpath = sourceSets.jmh.runtimeClasspath
+            mainClass = 'org.openjdk.jmh.Main'
+            args = [
+                    'ComparisonBenchmark',
+                    '-f', '1',
+                    '-wi', '2',
+                    '-i', '3',
+                    '-rf', 'json',
+                    '-rff', "${projectDir}/benchmark-results/all-results.json"
+            ]
+            jvmArgs = [
+                    '-XX:+UseG1GC',
+                    '-Xmx2g'
+            ]
+        }
     }
 }
 
