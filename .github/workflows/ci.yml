@@ -46,6 +46,11 @@ jobs:
   benchmark:
     runs-on: ubuntu-latest
     needs: test
+    # Add explicit permissions for commenting on PRs
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     # Only run benchmarks on main branch pushes and PRs to main to avoid excessive CI time
     if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
 
@@ -77,22 +82,22 @@ jobs:
 
       - name: Run serialization benchmarks
         run: |
-          ./gradlew jmhRunSerializationBenchmarks
+          ./gradlew jmh --include=".*serialize.*" --exclude=".*deserialize.*"
         continue-on-error: true
 
       - name: Run deserialization benchmarks
         run: |
-          ./gradlew jmhRunDeserializationBenchmarks
+          ./gradlew jmh --include=".*deserialize.*"
         continue-on-error: true
 
       - name: Run field access benchmarks
         run: |
-          ./gradlew jmhRunFieldAccessBenchmarks
+          ./gradlew jmh --include=".*singleFieldAccess.*"
         continue-on-error: true
 
       - name: Run size comparison benchmarks
         run: |
-          ./gradlew jmhRunSizeComparisonBenchmarks
+          ./gradlew jmh --include=".*measure.*"
         continue-on-error: true
 
       - name: Upload benchmark results
@@ -106,59 +111,63 @@ jobs:
       - name: Comment benchmark results on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        continue-on-error: true
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const fs = require('fs');
-            const path = require('path');
+            try {
+              const fs = require('fs');
+              const path = require('path');
             
-            // Find the latest benchmark results file
-            const resultsDir = 'benchmark-results';
-            let latestFile = null;
-            let latestTime = 0;
+              // Find the latest benchmark results file
+              const resultsDir = 'benchmark-results';
+              let latestFile = null;
+              let latestTime = 0;
             
-            if (fs.existsSync(resultsDir)) {
-              const files = fs.readdirSync(resultsDir);
-              for (const file of files) {
-                if (file.endsWith('.json')) {
-                  const filePath = path.join(resultsDir, file);
-                  const stats = fs.statSync(filePath);
-                  if (stats.mtime.getTime() > latestTime) {
-                    latestTime = stats.mtime.getTime();
-                    latestFile = filePath;
+              if (fs.existsSync(resultsDir)) {
+                const files = fs.readdirSync(resultsDir);
+                for (const file of files) {
+                  if (file.endsWith('.json')) {
+                    const filePath = path.join(resultsDir, file);
+                    const stats = fs.statSync(filePath);
+                    if (stats.mtime.getTime() > latestTime) {
+                      latestTime = stats.mtime.getTime();
+                      latestFile = filePath;
+                    }
                   }
                 }
               }
-            }
             
-            if (latestFile) {
-              const results = JSON.parse(fs.readFileSync(latestFile, 'utf8'));
+              if (latestFile) {
+                console.log(`Found benchmark results: ${latestFile}`);
+                const results = JSON.parse(fs.readFileSync(latestFile, 'utf8'));
             
-              // Group results by benchmark type
-              const serialization = results.filter(r => r.benchmark.includes('serialize'));
-              const deserialization = results.filter(r => r.benchmark.includes('deserialize'));
-              const fieldAccess = results.filter(r => r.benchmark.includes('singleFieldAccess'));
-              const sizes = results.filter(r => r.benchmark.includes('measure'));
+                // Group results by benchmark type
+                const serialization = results.filter(r => r.benchmark.includes('serialize'));
+                const deserialization = results.filter(r => r.benchmark.includes('deserialize'));
+                const fieldAccess = results.filter(r => r.benchmark.includes('singleFieldAccess'));
+                const sizes = results.filter(r => r.benchmark.includes('measure'));
             
-              // Format results into a table
-              const formatResults = (benchmarks, title) => {
-                if (benchmarks.length === 0) return '';
+                // Format results into a table
+                const formatResults = (benchmarks, title) => {
+                  if (benchmarks.length === 0) return '';
             
-                let table = `\n### ${title}\n\n| Library | Score (ns/op) | Error | Unit |\n|---------|---------------|-------|------|\n`;
+                  let table = `\n### ${title}\n\n| Library | Score (ns/op) | Error | Unit |\n|---------|---------------|-------|------|\n`;
             
-                benchmarks
-                  .sort((a, b) => a.primaryMetric.score - b.primaryMetric.score)
-                  .forEach(benchmark => {
-                    const name = benchmark.benchmark.split('.').pop().replace(/serialize|deserialize|singleFieldAccess|measure/, '').replace(/Imprint|JacksonJson|Kryo|MessagePack|Avro|Protobuf|FlatBuffers/, (match) => match);
-                    const score = benchmark.primaryMetric.score.toFixed(2);
-                    const error = benchmark.primaryMetric.scoreError.toFixed(2);
-                    const unit = benchmark.primaryMetric.scoreUnit;
-                    table += `| ${name} | ${score} | ±${error} | ${unit} |\n`;
-                  });
+                  benchmarks
+                    .sort((a, b) => a.primaryMetric.score - b.primaryMetric.score)
+                    .forEach(benchmark => {
+                      const name = benchmark.benchmark.split('.').pop().replace(/serialize|deserialize|singleFieldAccess|measure/, '').replace(/Imprint|JacksonJson|Kryo|MessagePack|Avro|Protobuf|FlatBuffers/, (match) => match);
+                      const score = benchmark.primaryMetric.score.toFixed(2);
+                      const error = benchmark.primaryMetric.scoreError.toFixed(2);
+                      const unit = benchmark.primaryMetric.scoreUnit;
+                      table += `| ${name} | ${score} | ±${error} | ${unit} |\n`;
+                    });
             
-                return table;
-              };
+                  return table;
+                };
             
-              const comment = `##Benchmark Results
+                const comment = `## Benchmark Results
             
               Benchmark comparison between Imprint and other serialization libraries:
               ${formatResults(serialization, 'Serialization Performance')}
@@ -175,26 +184,47 @@ jobs:
             
               </details>`;
             
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: comment
-              });
-            } else {
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: '## Benchmark Results\n\nBenchmark execution completed but no results file was found. Check the [workflow logs](' + 
-                      `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` + ') for details.'
-              });
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+            
+                console.log('Successfully posted benchmark results');
+              } else {
+                console.log('No benchmark results found');
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: '## Benchmark Results\n\nBenchmark execution completed but no results file was found. Check the [workflow logs](' + 
+                        `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` + ') for details.'
+                });
+              }
+            } catch (error) {
+              console.log('Failed to post benchmark comment:', error.message);
+              console.log('Benchmark results are still available in workflow artifacts');
+            
+              // Try to post a simple error message
+              try {
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: `## Benchmark Results\n\n Failed to process benchmark results automatically.\n\nResults are available in the [workflow artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`
+                });
+              } catch (commentError) {
+                console.log('Also failed to post error comment:', commentError.message);
+              }
             }
 
   # Optional: Run full benchmark suite on releases
   benchmark-full:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
