@@ -170,7 +170,7 @@ test {
 jmh {
     fork = 1
     warmupIterations = 2  // Reduced for faster CI
-    iterations = 3
+    iterations = 3  // Reduced for faster CI
     resultFormat = 'JSON'
     includeTests = false
     resultsFile = file("${projectDir}/benchmark-results/jmh-results-${new Date().format('yyyy-MM-dd-HHmmss')}.json")
@@ -180,7 +180,7 @@ jmh {
             '-XX:+UseG1GC',
             '-Xmx2g',
             '-XX:+UnlockExperimentalVMOptions',
-            '-XX:+UseJVMCICompiler'  // Use Graal if available for better performance
+            '-XX:+UseJVMCICompiler'
     ]
 }
 
