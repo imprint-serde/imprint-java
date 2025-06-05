@@ -73,7 +73,7 @@ protobuf {
 }
 
 // Download and setup FlatBuffers compiler for Linux (CI environment)
-task downloadFlatc {
+tasks.register('downloadFlatc') {
     description = 'Download FlatBuffers compiler'
     group = 'build setup'
 
@@ -117,7 +117,7 @@ task downloadFlatc {
 }
 
 // Generate FlatBuffers sources
-task generateFlatBuffers(type: Exec) {
+tasks.register('generateFlatBuffers', Exec) {
     dependsOn downloadFlatc
     description = 'Generate Java classes from FlatBuffers schema'
     group = 'build'
@@ -166,11 +166,11 @@ test {
     }
 }
 
-// JMH configuration
+// JMH configuration - optimized for Java 11
 jmh {
     fork = 1
     warmupIterations = 2  // Reduced for faster CI
-    iterations = 3  // Reduced for faster CI
+    iterations = 3
     resultFormat = 'JSON'
     includeTests = false
     resultsFile = file("${projectDir}/benchmark-results/jmh-results-${new Date().format('yyyy-MM-dd-HHmmss')}.json")
@@ -180,12 +180,12 @@ jmh {
             '-XX:+UseG1GC',
             '-Xmx2g',
             '-XX:+UnlockExperimentalVMOptions',
-            '-XX:+UseJVMCICompiler'
+            '-XX:+UseJVMCICompiler'  // Use Graal if available for better performance
     ]
 }
 
 // Create individual benchmark tasks for CI pipeline
-task jmhRunSerializationBenchmarks(type: JavaExec) {
+tasks.register('jmhRunSerializationBenchmarks', JavaExec) {
     dependsOn compileJmhJava
     description = 'Run serialization benchmarks'
     group = 'benchmarking'
@@ -206,7 +206,7 @@ task jmhRunSerializationBenchmarks(type: JavaExec) {
     }
 }
 
-task jmhRunDeserializationBenchmarks(type: JavaExec) {
+tasks.register('jmhRunDeserializationBenchmarks', JavaExec) {
     dependsOn compileJmhJava
     description = 'Run deserialization benchmarks'
     group = 'benchmarking'
@@ -227,7 +227,7 @@ task jmhRunDeserializationBenchmarks(type: JavaExec) {
     }
 }
 
-task jmhRunFieldAccessBenchmarks(type: JavaExec) {
+tasks.register('jmhRunFieldAccessBenchmarks', JavaExec) {
     dependsOn compileJmhJava
     description = 'Run field access benchmarks'
     group = 'benchmarking'
@@ -248,7 +248,7 @@ task jmhRunFieldAccessBenchmarks(type: JavaExec) {
     }
 }
 
-task jmhRunSizeComparisonBenchmarks(type: JavaExec) {
+tasks.register('jmhRunSizeComparisonBenchmarks', JavaExec) {
     dependsOn compileJmhJava
     description = 'Run size comparison benchmarks'
     group = 'benchmarking'
@@ -269,7 +269,7 @@ task jmhRunSizeComparisonBenchmarks(type: JavaExec) {
     }
 }
 
-task jmhRunMergeBenchmarks(type: JavaExec) {
+tasks.register('jmhRunMergeBenchmarks', JavaExec) {
     dependsOn compileJmhJava
     description = 'Run merge operation benchmarks'
     group = 'benchmarking'
@@ -290,7 +290,7 @@ task jmhRunMergeBenchmarks(type: JavaExec) {
     }
 }
 
-task jmhRunAllBenchmarks(type: JavaExec) {
+tasks.register('jmhRunAllBenchmarks', JavaExec) {
     dependsOn compileJmhJava
     description = 'Run all comparison benchmarks'
     group = 'benchmarking'
