@@ -7,6 +7,6 @@ import lombok.Value;
  */
 @Value
 public class SchemaId {
-    int fieldspaceId;
+    int fieldSpaceId;
     int schemaHash;
 }

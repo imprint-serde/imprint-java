@@ -6,19 +6,20 @@ import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
+import lombok.experimental.UtilityClass;
+
 import java.nio.ByteBuffer;
 
 /**
  * Utility class for encoding and decoding variable-length integers (VarInt).
  * Supports encoding/decoding of 32-bit unsigned integers.
  */
+@UtilityClass
 public final class VarInt {
     
     private static final byte CONTINUATION_BIT = (byte) 0x80;
     private static final byte SEGMENT_BITS = 0x7f;
     private static final int MAX_VARINT_LEN = 5; // Enough for u32
-    
-    private VarInt() {} // utility class
     
     
     /**
@@ -103,7 +104,7 @@ public final class VarInt {
         
         return length;
     }
-    
+
     /**
      * Result of a VarInt decode operation.
      */

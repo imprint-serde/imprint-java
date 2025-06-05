@@ -1,9 +1,11 @@
 package com.imprint.types;
 
+import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import com.imprint.util.VarInt;
 
 import java.nio.ByteBuffer;
+import java.util.*;
 
 /**
  * Interface for handling type-specific serialization, deserialization, and size estimation.
@@ -14,8 +16,52 @@ import java.nio.ByteBuffer;
 public interface TypeHandler {
     Value deserialize(ByteBuffer buffer) throws ImprintException;
     void serialize(Value value, ByteBuffer buffer) throws ImprintException;
-    int estimateSize(Value value);
+    int estimateSize(Value value) throws ImprintException;
     ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException;
+    
+
+    
+    @FunctionalInterface
+    interface BufferViewer {
+        int measureDataLength(ByteBuffer tempBuffer, int numElements) throws ImprintException;
+    }
+
+    // Helper method to eliminate duplication in ARRAY/MAP readValueBytes
+    static ByteBuffer readComplexValueBytes(ByteBuffer buffer, String typeName, BufferViewer measurer) throws ImprintException {
+        int initialPosition = buffer.position();
+        ByteBuffer tempBuffer = buffer.duplicate();
+        tempBuffer.order(buffer.order());
+
+        VarInt.DecodeResult lengthResult = VarInt.decode(tempBuffer);
+        int numElements = lengthResult.getValue();
+        int varIntLength = tempBuffer.position() - initialPosition;
+
+        if (numElements == 0) {
+            if (buffer.remaining() < varIntLength) {
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
+                        "Not enough bytes for empty " + typeName + " VarInt. Needed: " +
+                                varIntLength + ", available: " + buffer.remaining());
+            }
+            ByteBuffer valueSlice = buffer.slice();
+            valueSlice.limit(varIntLength);
+            buffer.position(initialPosition + varIntLength);
+            return valueSlice.asReadOnlyBuffer();
+        }
+
+        int dataLength = measurer.measureDataLength(tempBuffer, numElements);
+        int totalLength = varIntLength + dataLength;
+
+        if (buffer.remaining() < totalLength) {
+            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
+                    "Not enough bytes for " + typeName + " value. Needed: " + totalLength +
+                            ", available: " + buffer.remaining() + " at position " + initialPosition);
+        }
+
+        ByteBuffer valueSlice = buffer.slice();
+        valueSlice.limit(totalLength);
+        buffer.position(initialPosition + totalLength);
+        return valueSlice.asReadOnlyBuffer();
+    }
     
     // Static implementations for each type
     TypeHandler NULL = new TypeHandler() {
@@ -54,7 +100,7 @@ public interface TypeHandler {
         
         @Override
         public void serialize(Value value, ByteBuffer buffer) {
-            Value.BoolValue boolValue = (Value.BoolValue) value;
+            var boolValue = (Value.BoolValue) value;
             buffer.put((byte) (boolValue.getValue() ? 1 : 0));
         }
         
@@ -76,14 +122,14 @@ public interface TypeHandler {
         @Override
         public Value deserialize(ByteBuffer buffer) throws ImprintException {
             if (buffer.remaining() < 4) {
-                throw new ImprintException(com.imprint.error.ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for int32");
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for int32");
             }
             return Value.fromInt32(buffer.getInt());
         }
         
         @Override
         public void serialize(Value value, ByteBuffer buffer) {
-            Value.Int32Value int32Value = (Value.Int32Value) value;
+            var int32Value = (Value.Int32Value) value;
             buffer.putInt(int32Value.getValue());
         }
         
@@ -105,7 +151,7 @@ public interface TypeHandler {
         @Override
         public Value deserialize(ByteBuffer buffer) throws ImprintException {
             if (buffer.remaining() < 8) {
-                throw new ImprintException(com.imprint.error.ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for int64");
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for int64");
             }
             return Value.fromInt64(buffer.getLong());
         }
@@ -134,14 +180,14 @@ public interface TypeHandler {
         @Override
         public Value deserialize(ByteBuffer buffer) throws ImprintException {
             if (buffer.remaining() < 4) {
-                throw new ImprintException(com.imprint.error.ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for float32");
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for float32");
             }
             return Value.fromFloat32(buffer.getFloat());
         }
         
         @Override
         public void serialize(Value value, ByteBuffer buffer) {
-            Value.Float32Value float32Value = (Value.Float32Value) value;
+            var float32Value = (Value.Float32Value) value;
             buffer.putFloat(float32Value.getValue());
         }
         
@@ -163,14 +209,14 @@ public interface TypeHandler {
         @Override
         public Value deserialize(ByteBuffer buffer) throws ImprintException {
             if (buffer.remaining() < 8) {
-                throw new ImprintException(com.imprint.error.ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for float64");
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for float64");
             }
             return Value.fromFloat64(buffer.getDouble());
         }
         
         @Override
         public void serialize(Value value, ByteBuffer buffer) {
-            Value.Float64Value float64Value = (Value.Float64Value) value;
+            var float64Value = (Value.Float64Value) value;
             buffer.putDouble(float64Value.getValue());
         }
         
@@ -194,7 +240,7 @@ public interface TypeHandler {
             VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
             int length = lengthResult.getValue();
             if (buffer.remaining() < length) {
-                throw new ImprintException(com.imprint.error.ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for bytes value");
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for bytes value data after VarInt. Slice from readValueBytes is too short. Needed: " + length + ", available: " + buffer.remaining());
             }
             var bytesView = buffer.slice();
             bytesView.limit(length);
@@ -231,14 +277,25 @@ public interface TypeHandler {
         
         @Override
         public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
-            int originalPosition = buffer.position();
-            VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
-            int totalLength = lengthResult.getBytesRead() + lengthResult.getValue();
-            buffer.position(originalPosition);
-            var valueBuffer = buffer.slice();
-            valueBuffer.limit(totalLength);
-            buffer.position(buffer.position() + totalLength);
-            return valueBuffer.asReadOnlyBuffer();
+            int initialPos = buffer.position();
+            ByteBuffer tempMeasureBuffer = buffer.duplicate();
+            VarInt.DecodeResult dr = VarInt.decode(tempMeasureBuffer);
+            
+            int varIntByteLength = tempMeasureBuffer.position() - initialPos;
+            int payloadByteLength = dr.getValue();
+            int totalValueLength = varIntByteLength + payloadByteLength;
+
+            if (buffer.remaining() < totalValueLength) {
+                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
+                    "Not enough bytes for VarInt-prefixed data. Needed: " + totalValueLength + 
+                    ", available: " + buffer.remaining() + " at position " + initialPos);
+            }
+
+            ByteBuffer resultSlice = buffer.slice();
+            resultSlice.limit(totalValueLength);
+            
+            buffer.position(initialPos + totalValueLength); 
+            return resultSlice.asReadOnlyBuffer();
         }
     };
     
@@ -248,28 +305,28 @@ public interface TypeHandler {
             VarInt.DecodeResult strLengthResult = VarInt.decode(buffer);
             int strLength = strLengthResult.getValue();
             if (buffer.remaining() < strLength) {
-                throw new ImprintException(com.imprint.error.ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for string value");
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for string value data after VarInt. Slice from readValueBytes is too short. Needed: " + strLength + ", available: " + buffer.remaining());
             }
             var stringBytesView = buffer.slice();
             stringBytesView.limit(strLength);
             buffer.position(buffer.position() + strLength);
             try {
-                return Value.fromStringBuffer(stringBytesView.asReadOnlyBuffer());
+                return Value.fromStringBuffer(stringBytesView);
             } catch (Exception e) {
-                throw new ImprintException(com.imprint.error.ErrorType.INVALID_UTF8_STRING, "Invalid UTF-8 string");
+                throw new ImprintException(ErrorType.INVALID_UTF8_STRING, "Invalid UTF-8 string or buffer issue: " + e.getMessage());
             }
         }
         
         @Override
         public void serialize(Value value, ByteBuffer buffer) {
             if (value instanceof Value.StringBufferValue) {
-                Value.StringBufferValue bufferValue = (Value.StringBufferValue) value;
+                var bufferValue = (Value.StringBufferValue) value;
                 var stringBuffer = bufferValue.getBuffer();
                 VarInt.encode(stringBuffer.remaining(), buffer);
                 buffer.put(stringBuffer);
             } else {
-                Value.StringValue stringValue = (Value.StringValue) value;
-                byte[] stringBytes = stringValue.getUtf8Bytes(); // Use cached UTF-8 bytes
+                var stringValue = (Value.StringValue) value;
+                byte[] stringBytes = stringValue.getUtf8Bytes();
                 VarInt.encode(stringBytes.length, buffer);
                 buffer.put(stringBytes);
             }
@@ -283,21 +340,287 @@ public interface TypeHandler {
                 return VarInt.encodedLength(length) + length;
             } else {
                 Value.StringValue stringValue = (Value.StringValue) value;
-                byte[] utf8Bytes = stringValue.getUtf8Bytes(); // Use cached UTF-8 bytes
+                byte[] utf8Bytes = stringValue.getUtf8Bytes();
                 return VarInt.encodedLength(utf8Bytes.length) + utf8Bytes.length;
             }
         }
         
         @Override
         public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
-            int originalPosition = buffer.position();
+            int initialPos = buffer.position();
+            ByteBuffer tempMeasureBuffer = buffer.duplicate();
+            VarInt.DecodeResult dr = VarInt.decode(tempMeasureBuffer);
+
+            int varIntByteLength = tempMeasureBuffer.position() - initialPos;
+            int payloadByteLength = dr.getValue();
+            int totalValueLength = varIntByteLength + payloadByteLength;
+            
+            if (buffer.remaining() < totalValueLength) {
+                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
+                    "Not enough bytes for VarInt-prefixed string. Needed: " + totalValueLength + 
+                    ", available: " + buffer.remaining() + " at position " + initialPos);
+            }
+
+            ByteBuffer resultSlice = buffer.slice();
+            resultSlice.limit(totalValueLength);
+
+            buffer.position(initialPos + totalValueLength); 
+            return resultSlice.asReadOnlyBuffer();
+        }
+    };
+    
+    TypeHandler ARRAY = new TypeHandler() {
+        @Override
+        public Value deserialize(ByteBuffer buffer) throws ImprintException {
             VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
-            int totalLength = lengthResult.getBytesRead() + lengthResult.getValue();
-            buffer.position(originalPosition);
-            var valueBuffer = buffer.slice();
-            valueBuffer.limit(totalLength);
-            buffer.position(buffer.position() + totalLength);
-            return valueBuffer.asReadOnlyBuffer();
+            int length = lengthResult.getValue();
+            
+            if (length == 0) {
+                return Value.fromArray(Collections.emptyList());
+            }
+            
+            if (buffer.remaining() < 1) {
+                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for ARRAY element type code.");
+            }
+            var elementType = TypeCode.fromByte(buffer.get());
+            var elements = new ArrayList<Value>(length);
+            var elementHandler = elementType.getHandler();
+            
+            for (int i = 0; i < length; i++) {
+                var elementValueBytes = elementHandler.readValueBytes(buffer);
+                elementValueBytes.order(buffer.order());
+                var element = elementHandler.deserialize(elementValueBytes);
+                elements.add(element);
+            }
+            
+            return Value.fromArray(elements);
+        }
+        
+        @Override
+        public void serialize(Value value, ByteBuffer buffer) throws ImprintException {
+            var arrayValue = (Value.ArrayValue) value;
+            var elements = arrayValue.getValue();
+            VarInt.encode(elements.size(), buffer);
+            
+            if (elements.isEmpty()) return;
+
+            var elementType = elements.get(0).getTypeCode();
+            buffer.put(elementType.getCode());
+            var elementHandler = elementType.getHandler();
+            for (var element : elements) {
+                if (element.getTypeCode() != elementType) {
+                    throw new ImprintException(ErrorType.SCHEMA_ERROR, 
+                        "Array elements must have same type code: " + 
+                        element.getTypeCode() + " != " + elementType);
+                }
+                elementHandler.serialize(element, buffer);
+            }
+        }
+        
+        @Override
+        public int estimateSize(Value value) throws ImprintException {
+            var arrayValue = (Value.ArrayValue) value;
+            var elements = arrayValue.getValue();
+            int sizeOfLength = VarInt.encodedLength(elements.size());
+            if (elements.isEmpty()) {
+                return sizeOfLength;
+            }
+            int sizeOfElementTypeCode = 1;
+            int arraySize = sizeOfLength + sizeOfElementTypeCode;
+            var elementHandler = elements.get(0).getTypeCode().getHandler();
+            for (var element : elements) {
+                arraySize += elementHandler.estimateSize(element);
+            }
+            return arraySize;
+        }
+        
+        @Override
+        public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
+            return readComplexValueBytes(buffer, "ARRAY", (tempBuffer, numElements) -> {
+                if (tempBuffer.remaining() < 1) {
+                    throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
+                        "Not enough bytes for ARRAY element type code in temp buffer during measurement.");
+                }
+                byte elementTypeCodeByte = tempBuffer.get();
+                int typeCodeLength = 1;
+
+                TypeHandler elementHandler = TypeCode.fromByte(elementTypeCodeByte).getHandler();
+                int elementsDataLength = 0;
+                for (int i = 0; i < numElements; i++) {
+                    int elementStartPos = tempBuffer.position();
+                    elementHandler.readValueBytes(tempBuffer);
+                    elementsDataLength += (tempBuffer.position() - elementStartPos);
+                }
+                
+                return typeCodeLength + elementsDataLength;
+            });
+        }
+    };
+    
+    TypeHandler MAP = new TypeHandler() {
+        @Override
+        public Value deserialize(ByteBuffer buffer) throws ImprintException {
+            VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
+            int length = lengthResult.getValue();
+            
+            if (length == 0) {
+                return Value.fromMap(Collections.emptyMap());
+            }
+            
+            if (buffer.remaining() < 2) {
+                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for MAP key/value type codes.");
+            }
+            var keyType = TypeCode.fromByte(buffer.get());
+            var valueType = TypeCode.fromByte(buffer.get());
+            var map = new HashMap<MapKey, Value>(length);
+
+            var keyHandler = keyType.getHandler();
+            var valueHandler = valueType.getHandler();
+            
+            for (int i = 0; i < length; i++) {
+                var keyBytes = keyHandler.readValueBytes(buffer);
+                keyBytes.order(buffer.order());
+                var keyValue = keyHandler.deserialize(keyBytes);
+                var key = MapKey.fromValue(keyValue);
+                
+                var valueBytes = valueHandler.readValueBytes(buffer);
+                valueBytes.order(buffer.order());
+                var mapInternalValue = valueHandler.deserialize(valueBytes);
+                
+                map.put(key, mapInternalValue);
+            }
+            
+            return Value.fromMap(map);
+        }
+        
+        @Override
+        public void serialize(Value value, ByteBuffer buffer) throws ImprintException {
+            var mapValue = (Value.MapValue) value;
+            var map = mapValue.getValue();
+            VarInt.encode(map.size(), buffer);
+            
+            if (map.isEmpty()) {
+                return;
+            }
+            
+            var iterator = map.entrySet().iterator();
+            var first = iterator.next();
+            var keyType = first.getKey().getTypeCode();
+            var valueType = first.getValue().getTypeCode();
+            
+            buffer.put(keyType.getCode());
+            buffer.put(valueType.getCode());
+            
+            serializeMapKey(first.getKey(), buffer);
+            first.getValue().getTypeCode().getHandler().serialize(first.getValue(), buffer);
+            
+            while (iterator.hasNext()) {
+                var entry = iterator.next();
+                if (entry.getKey().getTypeCode() != keyType) {
+                    throw new ImprintException(ErrorType.SCHEMA_ERROR, 
+                        "Map keys must have same type code: " +
+                                entry.getKey().getTypeCode() + " != " + keyType);
+                }
+                if (entry.getValue().getTypeCode() != valueType) {
+                    throw new ImprintException(ErrorType.SCHEMA_ERROR, 
+                        "Map values must have same type code: " +
+                                entry.getValue().getTypeCode() + " != " + valueType);
+                }
+                
+                serializeMapKey(entry.getKey(), buffer);
+                entry.getValue().getTypeCode().getHandler().serialize(entry.getValue(), buffer);
+            }
+        }
+        
+        @Override
+        public int estimateSize(Value value) throws ImprintException {
+            var mapValue = (Value.MapValue) value;
+            var map = mapValue.getValue();
+            int sizeOfLength = VarInt.encodedLength(map.size());
+            if (map.isEmpty()) {
+                return sizeOfLength;
+            }
+            int sizeOfTypeCodes = 2; 
+            int mapSize = sizeOfLength + sizeOfTypeCodes; 
+            
+            for (var entry : map.entrySet()) {
+                mapSize += estimateMapKeySize(entry.getKey());
+                mapSize += entry.getValue().getTypeCode().getHandler().estimateSize(entry.getValue());
+            }
+            return mapSize;
+        }
+        
+        @Override
+        public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
+            return readComplexValueBytes(buffer, "MAP", (tempBuffer, numEntries) -> {
+                if (tempBuffer.remaining() < 2) {
+                    throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
+                        "Not enough bytes for MAP key/value type codes in temp buffer during measurement.");
+                }
+                byte keyTypeCodeByte = tempBuffer.get();
+                byte valueTypeCodeByte = tempBuffer.get();
+                int typeCodesLength = 2;
+                int entriesDataLength = 0;
+                for (int i = 0; i < numEntries; i++) {
+                    int entryStartPos = tempBuffer.position();
+                    TypeCode.fromByte(keyTypeCodeByte).getHandler().readValueBytes(tempBuffer);
+                    TypeCode.fromByte(valueTypeCodeByte).getHandler().readValueBytes(tempBuffer);
+                    entriesDataLength += (tempBuffer.position() - entryStartPos);
+                }
+
+                return typeCodesLength + entriesDataLength;
+            });
+        }
+        
+        private void serializeMapKey(MapKey key, ByteBuffer buffer) throws ImprintException {
+            switch (key.getTypeCode()) {
+                case INT32:
+                    MapKey.Int32Key int32Key = (MapKey.Int32Key) key;
+                    buffer.putInt(int32Key.getValue());
+                    break;
+                    
+                case INT64:
+                    MapKey.Int64Key int64Key = (MapKey.Int64Key) key;
+                    buffer.putLong(int64Key.getValue());
+                    break;
+                    
+                case BYTES:
+                    MapKey.BytesKey bytesKey = (MapKey.BytesKey) key;
+                    byte[] bytes = bytesKey.getValue();
+                    VarInt.encode(bytes.length, buffer);
+                    buffer.put(bytes);
+                    break;
+                    
+                case STRING:
+                    MapKey.StringKey stringKey = (MapKey.StringKey) key;
+                    byte[] stringBytes = stringKey.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    VarInt.encode(stringBytes.length, buffer);
+                    buffer.put(stringBytes);
+                    break;
+                    
+                default:
+                    throw new ImprintException(ErrorType.SERIALIZATION_ERROR, 
+                        "Invalid map key type: " + key.getTypeCode());
+            }
+        }
+        
+        private int estimateMapKeySize(MapKey key) throws ImprintException {
+            switch (key.getTypeCode()) {
+                case INT32: return 4;
+                case INT64: return 8;
+                case BYTES:
+                    byte[] bytes = ((MapKey.BytesKey) key).getValue();
+                    return VarInt.encodedLength(bytes.length) + bytes.length;
+
+                case STRING:
+                    var str = ((MapKey.StringKey) key).getValue();
+                    int utf8Length = str.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+                    return VarInt.encodedLength(utf8Length) + utf8Length;
+
+                default:
+                    throw new ImprintException(ErrorType.SERIALIZATION_ERROR, 
+                        "Invalid map key type: " + key.getTypeCode());
+            }
         }
     };
 }

@@ -205,9 +205,16 @@ public abstract class Value {
         @Override
         public boolean equals(Object obj) {
             if (this == obj) return true;
-            if (obj == null || getClass() != obj.getClass()) return false;
-            BytesValue that = (BytesValue) obj;
-            return Arrays.equals(value, that.value);
+            if (obj == null) return false;
+            if (obj instanceof BytesValue) {
+                BytesValue that = (BytesValue) obj;
+                return Arrays.equals(value, that.value);
+            }
+            if (obj instanceof BytesBufferValue) {
+                BytesBufferValue that = (BytesBufferValue) obj;
+                return Arrays.equals(value, that.getValue());
+            }
+            return false;
         }
         
         @Override
@@ -270,7 +277,6 @@ public abstract class Value {
     }
     
     // String Value (String-based)
-    @EqualsAndHashCode(callSuper = false)
     public static class StringValue extends Value {
         @Getter
         private final String value;
@@ -281,17 +287,37 @@ public abstract class Value {
         }
 
         public byte[] getUtf8Bytes() {
-            byte[] cached = cachedUtf8Bytes;
+            var cached = cachedUtf8Bytes;
             if (cached == null) {
                 // Multiple threads may compute this - that's OK since it's idempotent
                 cached = value.getBytes(StandardCharsets.UTF_8);
-                cachedUtf8Bytes = cached; // Benign race - last writer wins
+                cachedUtf8Bytes = cached;
             }
             return cached; // Return our computed value, not re-read from volatile field
         }
 
         @Override
         public TypeCode getTypeCode() { return TypeCode.STRING; }
+        
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null) return false;
+            if (obj instanceof StringValue) {
+                StringValue that = (StringValue) obj;
+                return value.equals(that.value);
+            }
+            if (obj instanceof StringBufferValue) {
+                StringBufferValue that = (StringBufferValue) obj;
+                return value.equals(that.getValue());
+            }
+            return false;
+        }
+        
+        @Override
+        public int hashCode() {
+            return value.hashCode();
+        }
         
         @Override
         public String toString() {
@@ -320,13 +346,14 @@ public abstract class Value {
 
         private String decodeUtf8() {
             // Fast path: zero-copy for array-backed ByteBuffers
-            if (value.hasArray() && value.arrayOffset() == 0) {
-                return new String(value.array(), value.position(),
+            if (value.hasArray()) {
+                return new String(value.array(), value.arrayOffset() + value.position(),
                         value.remaining(), StandardCharsets.UTF_8);
             }
 
-            // Fallback path - should be impossible since deserialize uses wrap() to create an array-backed ByteBuffer.
-            // Allocation required for direct ByteBuffers since Java's String API doesn't provide ByteBuffer constructors
+            // Fallback path for non-array-backed ByteBuffers (e.g., direct buffers).
+            // Allocation is required here as Java's String(byte[],...) constructor needs a heap array.
+            // Data is copied from the ByteBuffer to a new byte array.
             var array = new byte[value.remaining()];
             value.duplicate().get(array);
             return new String(array, StandardCharsets.UTF_8);

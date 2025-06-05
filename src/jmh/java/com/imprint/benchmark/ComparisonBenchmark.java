@@ -74,7 +74,7 @@ public class ComparisonBenchmark {
     }
 
     @Benchmark
-    public void serializeKryo(Blackhole bh) throws Exception {
+    public void serializeKryo(Blackhole bh) {
         byte[] result = serializeWithKryo(testData);
         bh.consume(result);
     }
@@ -102,49 +102,34 @@ public class ComparisonBenchmark {
     }
 
     // ===== FIELD ACCESS BENCHMARKS =====
-
+    // Tests accessing a single field near the end of a large record
     @Benchmark
-    public void fieldAccessImprint(Blackhole bh) throws Exception {
+    public void singleFieldAccessImprint(Blackhole bh) throws Exception {
         ImprintRecord record = ImprintRecord.deserialize(imprintBytes.duplicate());
         
-        // Access multiple fields without full deserialization
-        var id = record.getValue(1);
-        var name = record.getValue(2);
-        var price = record.getValue(3);
-        var active = record.getValue(4);
-        var category = record.getValue(5);
-        
-        bh.consume(id);
-        bh.consume(name);
-        bh.consume(price);
-        bh.consume(active);
-        bh.consume(category);
+        // Access field 15 directly via directory lookup - O(1)
+        var field15 = record.getValue(15);
+        bh.consume(field15);
     }
 
     @Benchmark
-    public void fieldAccessJackson(Blackhole bh) throws Exception {
-        // Jackson requires full deserialization to access fields
+    public void singleFieldAccessJackson(Blackhole bh) throws Exception {
+        // Jackson must deserialize entire object to access any field
         TestRecord record = jackson.readValue(jacksonBytes, TestRecord.class);
         
-        bh.consume(record.id);
-        bh.consume(record.name);
-        bh.consume(record.price);
-        bh.consume(record.active);
-        bh.consume(record.category);
+        // Access field15 equivalent (extraData[4]) after full deserialization
+        bh.consume(record.extraData.get(4));
     }
 
     @Benchmark
-    public void fieldAccessKryo(Blackhole bh) {
-        // Kryo requires full deserialization to access fields
+    public void singleFieldAccessKryo(Blackhole bh) {
+        // Kryo must deserialize entire object to access any field
         Input input = new Input(new ByteArrayInputStream(kryoBytes));
         TestRecord record = kryo.readObject(input, TestRecord.class);
         input.close();
         
-        bh.consume(record.id);
-        bh.consume(record.name);
-        bh.consume(record.price);
-        bh.consume(record.active);
-        bh.consume(record.category);
+        // Access field15 equivalent (extraData[4]) after full deserialization
+        bh.consume(record.extraData.get(4));
     }
 
     // ===== SIZE COMPARISON =====
@@ -162,7 +147,7 @@ public class ComparisonBenchmark {
     }
 
     @Benchmark
-    public void measureKryoSize(Blackhole bh) throws Exception {
+    public void measureKryoSize(Blackhole bh) {
         byte[] serialized = serializeWithKryo(testData);
         bh.consume(serialized.length);
     }
@@ -171,11 +156,9 @@ public class ComparisonBenchmark {
 
     @Benchmark
     public void mergeImprint(Blackhole bh) throws Exception {
-        // Simulate merge with Imprint (O(1) with proper API)
         var record1 = serializeWithImprint(testData);
         var record2 = serializeWithImprint(createTestRecord2());
-        
-        // Current simulation - will be O(1) with actual merge API
+
         var deserialized1 = ImprintRecord.deserialize(record1);
         var deserialized2 = ImprintRecord.deserialize(record2);
         var merged = simulateMerge(deserialized1, deserialized2);
@@ -196,7 +179,7 @@ public class ComparisonBenchmark {
     }
 
     @Benchmark
-    public void mergeKryo(Blackhole bh) throws Exception {
+    public void mergeKryo(Blackhole bh) {
         // Kryo merge requires full deserialization + merge + serialization
         Input input1 = new Input(new ByteArrayInputStream(kryoBytes));
         var record1 = kryo.readObject(input1, TestRecord.class);
@@ -237,6 +220,11 @@ public class ComparisonBenchmark {
         }
         writer.addField(7, Value.fromMap(metadataMap));
         
+        // Add extra fields (8-20) to create a larger record
+        for (int i = 0; i < data.extraData.size(); i++) {
+            writer.addField(8 + i, Value.fromString(data.extraData.get(i)));
+        }
+        
         return writer.build().serializeToBuffer();
     }
 
@@ -268,8 +256,8 @@ public class ComparisonBenchmark {
             int fieldId = entry.getId();
             if (!usedFieldIds.contains(fieldId)) {
                 var value = record.getValue(fieldId);
-                if (value.isPresent()) {
-                    writer.addField(fieldId, value.get());
+                if (value != null) {
+                    writer.addField(fieldId, value);
                     usedFieldIds.add(fieldId);
                 }
             }
@@ -309,6 +297,12 @@ public class ComparisonBenchmark {
         record.metadata.put("model", "TC-2024");
         record.metadata.put("warranty", "2 years");
         
+        // Add extra data to create a larger record (fields 8-20)
+        record.extraData = new ArrayList<>();
+        for (int i = 0; i < 13; i++) {
+            record.extraData.add("extraField" + i + "_value_" + (1000 + i));
+        }
+        
         return record;
     }
 
@@ -326,6 +320,12 @@ public class ComparisonBenchmark {
         record.metadata.put("vendor", "SoftCorp");
         record.metadata.put("version", "2.1");
         
+        // Add extra data to match the structure
+        record.extraData = new ArrayList<>();
+        for (int i = 0; i < 13; i++) {
+            record.extraData.add("extraField" + i + "_value2_" + (2000 + i));
+        }
+        
         return record;
     }
 
@@ -338,6 +338,7 @@ public class ComparisonBenchmark {
         public String category;
         public List<String> tags = new ArrayList<>();
         public Map<String, String> metadata = new HashMap<>();
+        public List<String> extraData = new ArrayList<>(); // Fields 8-20 for large record test
         
         public TestRecord() {} // Required for deserialization
     }
