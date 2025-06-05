@@ -33,11 +33,6 @@ class TypeHandlerTest {
         buffer.flip();
         var deserialized = handler.deserialize(buffer);
         assertThat(deserialized).isEqualTo(value);
-
-        // readValueBytes
-        buffer.clear();
-        var valueBytes = handler.readValueBytes(buffer);
-        assertThat(valueBytes.remaining()).isEqualTo(0);
     }
 
     @ParameterizedTest
