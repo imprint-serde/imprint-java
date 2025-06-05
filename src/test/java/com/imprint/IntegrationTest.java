@@ -16,16 +16,11 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 public class IntegrationTest {
 
-    // Removed main method, individual methods are now JUnit tests.
-
     @Test
     @DisplayName("Basic functionality: create, serialize, deserialize primitive types")
     void testBasicFunctionality() throws ImprintException {
-        System.out.println("Testing basic functionality..."); // Keep for now if desired, or remove
-
         SchemaId schemaId = new SchemaId(1, 0xdeadbeef);
-        // Using ImprintRecordBuilder for consistency with other tests
-        ImprintRecord record = ImprintRecord.builder(schemaId)
+        var record = ImprintRecord.builder(schemaId)
                 .field(1, 42)
                 .field(2, "testing java imprint spec")
                 .field(3, true)
@@ -33,7 +28,7 @@ public class IntegrationTest {
                 .field(5, new byte[]{1, 2, 3, 4})
                 .build();
 
-        // Verify we can read values back using ergonomic getters
+        // Verify we can read values back using type getters
         assertEquals(42, record.getInt32(1));
         assertEquals("testing java imprint spec", record.getString(2));
         assertTrue(record.getBoolean(3));
@@ -47,7 +42,7 @@ public class IntegrationTest {
         var buffer = record.serializeToBuffer();
         byte[] serialized = new byte[buffer.remaining()];
         buffer.get(serialized);
-        ImprintRecord deserialized = ImprintRecord.deserialize(serialized);
+        var deserialized = ImprintRecord.deserialize(serialized);
 
         assertEquals(42, deserialized.getInt32(1));
         assertEquals("testing java imprint spec", deserialized.getString(2));
@@ -61,8 +56,6 @@ public class IntegrationTest {
     @Test
     @DisplayName("Collections: create, serialize, deserialize arrays and maps")
     void testArraysAndMaps() throws ImprintException {
-        System.out.println("Testing arrays and maps...");
-
         SchemaId schemaId = new SchemaId(2, 0xcafebabe);
 
         // Create an array using builder for convenience
@@ -72,8 +65,7 @@ public class IntegrationTest {
         Map<String, Integer> sourceStringToIntMap = new HashMap<>();
         sourceStringToIntMap.put("one", 1);
         sourceStringToIntMap.put("two", 2);
-
-        ImprintRecord record = ImprintRecord.builder(schemaId)
+        var record = ImprintRecord.builder(schemaId)
                 .field(1, sourceIntList) // Builder converts List<Object> to List<Value>
                 .field(2, sourceStringToIntMap) // Builder converts Map<Object, Object>
                 .build();
@@ -107,14 +99,14 @@ public class IntegrationTest {
     void testNestedRecords() throws ImprintException {
         System.out.println("Testing nested records...");
 
-        SchemaId innerSchemaId = new SchemaId(3, 0x12345678);
-        ImprintRecord innerRecord = ImprintRecord.builder(innerSchemaId)
+        var innerSchemaId = new SchemaId(3, 0x12345678);
+        var innerRecord = ImprintRecord.builder(innerSchemaId)
                 .field(1, "nested data")
                 .field(2, 9876543210L)
                 .build();
 
-        SchemaId outerSchemaId = new SchemaId(4, 0x87654321);
-        ImprintRecord outerRecord = ImprintRecord.builder(outerSchemaId)
+        var outerSchemaId = new SchemaId(4, 0x87654321);
+        var outerRecord = ImprintRecord.builder(outerSchemaId)
                 .field(1, innerRecord) // Builder handles ImprintRecord directly
                 .field(2, "outer data")
                 .build();
@@ -122,12 +114,12 @@ public class IntegrationTest {
         var buffer = outerRecord.serializeToBuffer();
         byte[] serialized = new byte[buffer.remaining()];
         buffer.get(serialized);
-        ImprintRecord deserialized = ImprintRecord.deserialize(serialized);
+        var deserialized = ImprintRecord.deserialize(serialized);
 
         assertEquals(4, deserialized.getHeader().getSchemaId().getFieldSpaceId());
         assertEquals("outer data", deserialized.getString(2));
 
-        ImprintRecord nestedDeserialized = deserialized.getRow(1);
+        var nestedDeserialized = deserialized.getRow(1);
         assertNotNull(nestedDeserialized);
         assertEquals(3, nestedDeserialized.getHeader().getSchemaId().getFieldSpaceId());
         assertEquals("nested data", nestedDeserialized.getString(1));
@@ -135,8 +127,6 @@ public class IntegrationTest {
 
         System.out.println("✓ Nested records test passed");
     }
-
-    // --- Start of broken down tests for ErgonomicGettersAndNestedTypes ---
 
     private ImprintRecord createTestRecordForGetters() throws ImprintException {
         SchemaId schemaId = new SchemaId(5, 0xabcdef01);
@@ -174,8 +164,8 @@ public class IntegrationTest {
     @Test
     @DisplayName("Type Getters: Basic primitive and String types")
     void testBasicTypeGetters() throws ImprintException {
-        ImprintRecord originalRecord = createTestRecordForGetters();
-        ImprintRecord record = serializeAndDeserialize(originalRecord);
+        var originalRecord = createTestRecordForGetters();
+        var record = serializeAndDeserialize(originalRecord);
 
         assertTrue(record.getBoolean(1));
         assertEquals(12345, record.getInt32(2));
@@ -189,8 +179,8 @@ public class IntegrationTest {
     @Test
     @DisplayName("Type Getters: Array of Arrays")
     void testTypeGetterArrayOfArrays() throws ImprintException {
-        ImprintRecord originalRecord = createTestRecordForGetters();
-        ImprintRecord record = serializeAndDeserialize(originalRecord);
+        var originalRecord = createTestRecordForGetters();
+        var record = serializeAndDeserialize(originalRecord);
 
         List<Value> arrOfArr = record.getArray(9);
         assertNotNull(arrOfArr);
@@ -211,8 +201,8 @@ public class IntegrationTest {
     @Test
     @DisplayName("Type Getters: Map with Array Value")
     void testTypeGetterMapWithArrayValue() throws ImprintException {
-        ImprintRecord originalRecord = createTestRecordForGetters();
-        ImprintRecord record = serializeAndDeserialize(originalRecord);
+        var originalRecord = createTestRecordForGetters();
+        var record = serializeAndDeserialize(originalRecord);
 
         Map<MapKey, Value> mapWithArr = record.getMap(10);
         assertNotNull(mapWithArr);
@@ -227,8 +217,8 @@ public class IntegrationTest {
     @Test
     @DisplayName("Type Getters: Empty Collections (Array and Map)")
     void testErgonomicGettersEmptyCollections() throws ImprintException {
-        ImprintRecord originalRecord = createTestRecordForGetters();
-        ImprintRecord record = serializeAndDeserialize(originalRecord);
+        var originalRecord = createTestRecordForGetters();
+        var record = serializeAndDeserialize(originalRecord);
 
         List<Value> emptyArr = record.getArray(11);
         assertNotNull(emptyArr);
@@ -242,8 +232,8 @@ public class IntegrationTest {
     @Test
     @DisplayName("Type Getters: Exception for Field Not Found")
     void testErgonomicGetterExceptionFieldNotFound() throws ImprintException {
-        ImprintRecord originalRecord = createTestRecordForGetters();
-        ImprintRecord record = serializeAndDeserialize(originalRecord);
+        var originalRecord = createTestRecordForGetters();
+        var record = serializeAndDeserialize(originalRecord);
 
         ImprintException ex = assertThrows(ImprintException.class, () -> record.getInt32(99));
         assertEquals(ErrorType.FIELD_NOT_FOUND, ex.getErrorType());
@@ -252,8 +242,8 @@ public class IntegrationTest {
     @Test
     @DisplayName("Type Getters: Exception for Null Field accessed as primitive")
     void testErgonomicGetterExceptionNullField() throws ImprintException {
-        ImprintRecord originalRecord = createTestRecordForGetters();
-        ImprintRecord record = serializeAndDeserialize(originalRecord);
+        var originalRecord = createTestRecordForGetters();
+        var record = serializeAndDeserialize(originalRecord);
 
         ImprintException ex = assertThrows(ImprintException.class, () -> record.getString(8));
         assertEquals(ErrorType.TYPE_MISMATCH, ex.getErrorType()); // getString throws TYPE_MISMATCH for null
@@ -269,8 +259,8 @@ public class IntegrationTest {
     @Test
     @DisplayName("Type Getters: Exception for Type Mismatch")
     void testErgonomicGetterExceptionTypeMismatch() throws ImprintException {
-        ImprintRecord originalRecord = createTestRecordForGetters();
-        ImprintRecord record = serializeAndDeserialize(originalRecord);
+        var originalRecord = createTestRecordForGetters();
+        var record = serializeAndDeserialize(originalRecord);
 
         ImprintException ex = assertThrows(ImprintException.class, () -> record.getInt32(6)); // Field 6 is a String
         assertEquals(ErrorType.TYPE_MISMATCH, ex.getErrorType());
@@ -279,20 +269,20 @@ public class IntegrationTest {
     @Test
     @DisplayName("Type Getters: Row (Nested Record)")
     void testErgonomicGetterRow() throws ImprintException {
-        SchemaId innerSchemaId = new SchemaId(6, 0x12345678);
-        ImprintRecord innerRecord = ImprintRecord.builder(innerSchemaId)
+        var innerSchemaId = new SchemaId(6, 0x12345678);
+        var innerRecord = ImprintRecord.builder(innerSchemaId)
                 .field(101, "nested string")
                 .field(102, 999L)
                 .build();
 
-        ImprintRecord recordWithRow = ImprintRecord.builder(new SchemaId(7, 0x87654321))
+        var recordWithRow = ImprintRecord.builder(new SchemaId(7, 0x87654321))
                 .field(201, innerRecord) // Using builder to add row
                 .field(202, "outer field")
                 .build();
 
-        ImprintRecord deserializedWithRow = serializeAndDeserialize(recordWithRow);
+        var deserializedWithRow = serializeAndDeserialize(recordWithRow);
 
-        ImprintRecord retrievedRow = deserializedWithRow.getRow(201);
+        var retrievedRow = deserializedWithRow.getRow(201);
         assertNotNull(retrievedRow);
         assertEquals(innerSchemaId, retrievedRow.getHeader().getSchemaId());
         assertEquals("nested string", retrievedRow.getString(101));
