@@ -1,0 +1,15 @@
+namespace com.imprint.benchmark;
+
+table TestRecordFB {
+  id: int;
+  name: string;
+  price: double;
+  active: bool;
+  category: string;
+  tags: [string];
+  metadata_keys: [string];
+  metadata_values: [string];
+  extra_data: [string];
+}
+
+root_type TestRecordFB;
