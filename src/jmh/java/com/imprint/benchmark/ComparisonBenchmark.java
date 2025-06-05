@@ -10,6 +10,7 @@ import com.imprint.core.ImprintWriter;
 import com.imprint.core.SchemaId;
 import com.imprint.types.MapKey;
 import com.imprint.types.Value;
+import lombok.NoArgsConstructor;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumReader;
@@ -90,7 +91,6 @@ public class ComparisonBenchmark {
     }
 
     // ===== SERIALIZATION BENCHMARKS =====
-
     @Benchmark
     public void serializeImprint(Blackhole bh) throws Exception {
         ByteBuffer result = serializeWithImprint(testData);
@@ -134,7 +134,6 @@ public class ComparisonBenchmark {
     }
 
     // ===== DESERIALIZATION BENCHMARKS =====
-
     @Benchmark
     public void deserializeImprint(Blackhole bh) throws Exception {
         ImprintRecord result = ImprintRecord.deserialize(imprintBytesBuffer.duplicate());
@@ -181,8 +180,6 @@ public class ComparisonBenchmark {
 
     // ===== FIELD ACCESS BENCHMARKS =====
     // Tests accessing a single field near the end of a large record
-    // This showcases Imprint's O(1) directory lookup vs sequential deserialization
-
     @Benchmark
     public void singleFieldAccessImprint(Blackhole bh) throws Exception {
         ImprintRecord record = ImprintRecord.deserialize(imprintBytesBuffer.duplicate());
@@ -213,19 +210,19 @@ public class ComparisonBenchmark {
     @Benchmark
     public void singleFieldAccessAvro(Blackhole bh) throws Exception {
         GenericRecord record = deserializeWithAvro(avroBytes);
-        bh.consume(record.get("extraData4")); // Accessing field near end
+        bh.consume(record.get("extraData4"));
     }
 
     @Benchmark
     public void singleFieldAccessProtobuf(Blackhole bh) throws Exception {
         TestRecordProto.TestRecord record = TestRecordProto.TestRecord.parseFrom(protobufBytes);
-        bh.consume(record.getExtraData(4)); // Accessing field near end
+        bh.consume(record.getExtraData(4));
     }
 
     @Benchmark
     public void singleFieldAccessFlatBuffers(Blackhole bh) {
         TestRecordFB record = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
-        bh.consume(record.extraData(4)); // Accessing field near end - zero copy!
+        bh.consume(record.extraData(4));
     }
 
     // ===== SIZE COMPARISON =====
@@ -694,8 +691,8 @@ public class ComparisonBenchmark {
         FlatBufferBuilder builder = new FlatBufferBuilder(1024);
 
         // Use second record's values if they exist, otherwise first record's values
-        String name = second.name() != null && !second.name().isEmpty() ? second.name() : first.name();
-        String category = second.category() != null && !second.category().isEmpty() ? second.category() : first.category();
+        String name = second.name() != null && !Objects.requireNonNull(second.name()).isEmpty() ? second.name() : first.name();
+        String category = second.category() != null && !Objects.requireNonNull(second.category()).isEmpty() ? second.category() : first.category();
         double price = second.price() != 0.0 ? second.price() : first.price();
         boolean active = second.active(); // Use second's boolean value
         int id = first.id(); // Keep first record's ID
@@ -809,6 +806,7 @@ public class ComparisonBenchmark {
     }
 
     // Test data class for other serialization libraries
+    @NoArgsConstructor
     public static class TestRecord {
         public int id;
         public String name;
@@ -817,8 +815,7 @@ public class ComparisonBenchmark {
         public String category;
         public List<String> tags = new ArrayList<>();
         public Map<String, String> metadata = new HashMap<>();
-        public List<String> extraData = new ArrayList<>(); // Fields 8-20 for large record test
-
-        public TestRecord() {} // Required for deserialization
+        // Fields 8-20 for large record test
+        public List<String> extraData = new ArrayList<>();
     }
 }

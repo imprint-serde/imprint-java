@@ -192,11 +192,11 @@ public abstract class Value {
         private final byte[] value;
         
         public BytesValue(byte[] value) {
-            this.value = value.clone(); // defensive copy
+            this.value = value.clone();
         }
         
         public byte[] getValue() { 
-            return value.clone(); // defensive copy
+            return value.clone();
         }
         
         @Override
@@ -233,7 +233,7 @@ public abstract class Value {
         private final ByteBuffer value;
         
         public BytesBufferValue(ByteBuffer value) {
-            this.value = value.asReadOnlyBuffer(); // zero-copy read-only view
+            this.value = value.asReadOnlyBuffer();
         }
         
         public byte[] getValue() { 
@@ -244,7 +244,7 @@ public abstract class Value {
         }
         
         public ByteBuffer getBuffer() {
-            return value.duplicate(); // zero-copy view
+            return value.duplicate();
         }
         
         @Override
@@ -289,11 +289,11 @@ public abstract class Value {
         public byte[] getUtf8Bytes() {
             var cached = cachedUtf8Bytes;
             if (cached == null) {
-                // Multiple threads may compute this - that's OK since it's idempotent
+                // UTF8 is idempotent so no need to synchronize
                 cached = value.getBytes(StandardCharsets.UTF_8);
                 cachedUtf8Bytes = cached;
             }
-            return cached; // Return our computed value, not re-read from volatile field
+            return cached; // Return computed value
         }
 
         @Override
@@ -363,14 +363,14 @@ public abstract class Value {
                     // Fallback: copy bytes from the ByteBuffer to a new heap array (if too large for cache)
                     array = new byte[length];
                 }
-                value.duplicate().get(array, 0, length); // Get bytes from current position into chosen array
+                value.duplicate().get(array, 0, length);
                 offset = 0;
             }
             return new String(array, offset, length, StandardCharsets.UTF_8);
         }
 
         public ByteBuffer getBuffer() {
-            return value.duplicate(); // zero-copy view
+            return value.duplicate();
         }
 
         @Override
