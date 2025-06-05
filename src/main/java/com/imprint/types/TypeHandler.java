@@ -9,7 +9,7 @@ import java.util.*;
 
 /**
  * Interface for handling type-specific serialization, deserialization, and size estimation.
- * Note that primitives are potentially auto/un-boxed here which could impact performance slightly
+ * Note that primitives are basically boxed here which could impact performance slightly
  * but having all the types in their own implementation helps keep things organized for now, especially
  * for dealing with and testing more complex types in the future.
  */
@@ -26,7 +26,7 @@ public interface TypeHandler {
         int measureDataLength(ByteBuffer tempBuffer, int numElements) throws ImprintException;
     }
 
-    // Helper method to eliminate duplication in ARRAY/MAP readValueBytes
+    // Helper method for complex buffer positioning in MAP and ARRAY
     static ByteBuffer readComplexValueBytes(ByteBuffer buffer, String typeName, BufferViewer measurer) throws ImprintException {
         int initialPosition = buffer.position();
         ByteBuffer tempBuffer = buffer.duplicate();
@@ -571,15 +571,13 @@ public interface TypeHandler {
                 }
                 byte keyTypeCodeByte = tempBuffer.get();
                 byte valueTypeCodeByte = tempBuffer.get();
-                TypeCode keyType = TypeCode.fromByte(keyTypeCodeByte);
-                TypeCode valueType = TypeCode.fromByte(valueTypeCodeByte);
+                var keyType = TypeCode.fromByte(keyTypeCodeByte);
+                var valueType = TypeCode.fromByte(valueTypeCodeByte);
 
-                // OPTIMIZATION: Calculate sizes directly for fixed-size types
                 int keySize = getFixedTypeSize(keyType);
                 int valueSize = getFixedTypeSize(valueType);
 
                 if (keySize > 0 && valueSize > 0) {
-                    // Both are fixed-size: O(1) calculation
                     return 2 + (numEntries * (keySize + valueSize));
                 } else {
                     // At least one is variable-size: fall back to traversal
