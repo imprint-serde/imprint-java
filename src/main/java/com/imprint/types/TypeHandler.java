@@ -17,52 +17,7 @@ public interface TypeHandler {
     Value deserialize(ByteBuffer buffer) throws ImprintException;
     void serialize(Value value, ByteBuffer buffer) throws ImprintException;
     int estimateSize(Value value) throws ImprintException;
-    ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException;
-    
 
-    
-    @FunctionalInterface
-    interface BufferViewer {
-        int measureDataLength(ByteBuffer tempBuffer, int numElements) throws ImprintException;
-    }
-
-    // Helper method for complex buffer positioning in MAP and ARRAY
-    static ByteBuffer readComplexValueBytes(ByteBuffer buffer, String typeName, BufferViewer measurer) throws ImprintException {
-        int initialPosition = buffer.position();
-        ByteBuffer tempBuffer = buffer.duplicate();
-        tempBuffer.order(buffer.order());
-
-        VarInt.DecodeResult lengthResult = VarInt.decode(tempBuffer);
-        int numElements = lengthResult.getValue();
-        int varIntLength = tempBuffer.position() - initialPosition;
-
-        if (numElements == 0) {
-            if (buffer.remaining() < varIntLength) {
-                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
-                        "Not enough bytes for empty " + typeName + " VarInt. Needed: " +
-                                varIntLength + ", available: " + buffer.remaining());
-            }
-            ByteBuffer valueSlice = buffer.slice();
-            valueSlice.limit(varIntLength);
-            buffer.position(initialPosition + varIntLength);
-            return valueSlice.asReadOnlyBuffer();
-        }
-
-        int dataLength = measurer.measureDataLength(tempBuffer, numElements);
-        int totalLength = varIntLength + dataLength;
-
-        if (buffer.remaining() < totalLength) {
-            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
-                    "Not enough bytes for " + typeName + " value. Needed: " + totalLength +
-                            ", available: " + buffer.remaining() + " at position " + initialPosition);
-        }
-
-        ByteBuffer valueSlice = buffer.slice();
-        valueSlice.limit(totalLength);
-        buffer.position(initialPosition + totalLength);
-        return valueSlice.asReadOnlyBuffer();
-    }
-    
     // Static implementations for each type
     TypeHandler NULL = new TypeHandler() {
         @Override
@@ -78,11 +33,6 @@ public interface TypeHandler {
         @Override
         public int estimateSize(Value value) {
             return 0;
-        }
-        
-        @Override
-        public ByteBuffer readValueBytes(ByteBuffer buffer) {
-            return ByteBuffer.allocate(0).asReadOnlyBuffer();
         }
     };
     
@@ -108,14 +58,6 @@ public interface TypeHandler {
         public int estimateSize(Value value) {
             return 1;
         }
-        
-        @Override
-        public ByteBuffer readValueBytes(ByteBuffer buffer) {
-            var boolBuffer = buffer.slice();
-            boolBuffer.limit(1);
-            buffer.position(buffer.position() + 1);
-            return boolBuffer.asReadOnlyBuffer();
-        }
     };
     
     TypeHandler INT32 = new TypeHandler() {
@@ -136,14 +78,6 @@ public interface TypeHandler {
         @Override
         public int estimateSize(Value value) {
             return 4;
-        }
-        
-        @Override
-        public ByteBuffer readValueBytes(ByteBuffer buffer) {
-            var int32Buffer = buffer.slice();
-            int32Buffer.limit(4);
-            buffer.position(buffer.position() + 4);
-            return int32Buffer.asReadOnlyBuffer();
         }
     };
     
@@ -166,14 +100,6 @@ public interface TypeHandler {
         public int estimateSize(Value value) {
             return 8;
         }
-        
-        @Override
-        public ByteBuffer readValueBytes(ByteBuffer buffer) {
-            var int64Buffer = buffer.slice();
-            int64Buffer.limit(8);
-            buffer.position(buffer.position() + 8);
-            return int64Buffer.asReadOnlyBuffer();
-        }
     };
     
     TypeHandler FLOAT32 = new TypeHandler() {
@@ -195,14 +121,6 @@ public interface TypeHandler {
         public int estimateSize(Value value) {
             return 4;
         }
-        
-        @Override
-        public ByteBuffer readValueBytes(ByteBuffer buffer) {
-            var float32Buffer = buffer.slice();
-            float32Buffer.limit(4);
-            buffer.position(buffer.position() + 4);
-            return float32Buffer.asReadOnlyBuffer();
-        }
     };
     
     TypeHandler FLOAT64 = new TypeHandler() {
@@ -223,14 +141,6 @@ public interface TypeHandler {
         @Override
         public int estimateSize(Value value) {
             return 8;
-        }
-        
-        @Override
-        public ByteBuffer readValueBytes(ByteBuffer buffer) {
-            var float64Buffer = buffer.slice();
-            float64Buffer.limit(8);
-            buffer.position(buffer.position() + 8);
-            return float64Buffer.asReadOnlyBuffer();
         }
     };
     
@@ -273,29 +183,6 @@ public interface TypeHandler {
                 byte[] bytes = ((Value.BytesValue) value).getValue();
                 return VarInt.encodedLength(bytes.length) + bytes.length;
             }
-        }
-        
-        @Override
-        public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
-            int initialPos = buffer.position();
-            ByteBuffer tempMeasureBuffer = buffer.duplicate();
-            VarInt.DecodeResult dr = VarInt.decode(tempMeasureBuffer);
-            
-            int varIntByteLength = tempMeasureBuffer.position() - initialPos;
-            int payloadByteLength = dr.getValue();
-            int totalValueLength = varIntByteLength + payloadByteLength;
-
-            if (buffer.remaining() < totalValueLength) {
-                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
-                    "Not enough bytes for VarInt-prefixed data. Needed: " + totalValueLength + 
-                    ", available: " + buffer.remaining() + " at position " + initialPos);
-            }
-
-            ByteBuffer resultSlice = buffer.slice();
-            resultSlice.limit(totalValueLength);
-            
-            buffer.position(initialPos + totalValueLength); 
-            return resultSlice.asReadOnlyBuffer();
         }
     };
     
@@ -344,29 +231,6 @@ public interface TypeHandler {
                 return VarInt.encodedLength(utf8Bytes.length) + utf8Bytes.length;
             }
         }
-        
-        @Override
-        public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
-            int initialPos = buffer.position();
-            ByteBuffer tempMeasureBuffer = buffer.duplicate();
-            VarInt.DecodeResult dr = VarInt.decode(tempMeasureBuffer);
-
-            int varIntByteLength = tempMeasureBuffer.position() - initialPos;
-            int payloadByteLength = dr.getValue();
-            int totalValueLength = varIntByteLength + payloadByteLength;
-            
-            if (buffer.remaining() < totalValueLength) {
-                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, 
-                    "Not enough bytes for VarInt-prefixed string. Needed: " + totalValueLength + 
-                    ", available: " + buffer.remaining() + " at position " + initialPos);
-            }
-
-            ByteBuffer resultSlice = buffer.slice();
-            resultSlice.limit(totalValueLength);
-
-            buffer.position(initialPos + totalValueLength); 
-            return resultSlice.asReadOnlyBuffer();
-        }
     };
     
     TypeHandler ARRAY = new TypeHandler() {
@@ -374,25 +238,24 @@ public interface TypeHandler {
         public Value deserialize(ByteBuffer buffer) throws ImprintException {
             VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
             int length = lengthResult.getValue();
-            
+
             if (length == 0) {
                 return Value.fromArray(Collections.emptyList());
             }
-            
+
             if (buffer.remaining() < 1) {
-                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for ARRAY element type code.");
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for ARRAY element type code.");
             }
             var elementType = TypeCode.fromByte(buffer.get());
             var elements = new ArrayList<Value>(length);
             var elementHandler = elementType.getHandler();
-            
+
+            //Let each element handler consume what it needs from the buffer
             for (int i = 0; i < length; i++) {
-                var elementValueBytes = elementHandler.readValueBytes(buffer);
-                elementValueBytes.order(buffer.order());
-                var element = elementHandler.deserialize(elementValueBytes);
+                var element = elementHandler.deserialize(buffer); //Handler advances buffer position
                 elements.add(element);
             }
-            
+
             return Value.fromArray(elements);
         }
         
@@ -433,40 +296,6 @@ public interface TypeHandler {
             }
             return arraySize;
         }
-
-        @Override
-        public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
-            return readComplexValueBytes(buffer, "ARRAY", (tempBuffer, numElements) -> {
-                if (tempBuffer.remaining() < 1) {
-                    throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
-                            "Not enough bytes for ARRAY element type code");
-                }
-                byte elementTypeCodeByte = tempBuffer.get();
-                var elementType = TypeCode.fromByte(elementTypeCodeByte);
-
-                switch (elementType) {
-                    case NULL:
-                        return 1;
-                    case BOOL:
-                        return 1 + numElements;
-                    case INT32:
-                    case FLOAT32:
-                        return 1 + (numElements * 4);
-                    case INT64:
-                    case FLOAT64:
-                        return 1 + (numElements * 8);
-                    default:
-                        var elementHandler = elementType.getHandler();
-                        int elementsDataLength = 0;
-                        for (int i = 0; i < numElements; i++) {
-                            int elementStartPos = tempBuffer.position();
-                            elementHandler.readValueBytes(tempBuffer);
-                            elementsDataLength += (tempBuffer.position() - elementStartPos);
-                        }
-                        return 1 + elementsDataLength;
-                }
-            });
-        }
     };
     
     TypeHandler MAP = new TypeHandler() {
@@ -474,13 +303,13 @@ public interface TypeHandler {
         public Value deserialize(ByteBuffer buffer) throws ImprintException {
             VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
             int length = lengthResult.getValue();
-            
+
             if (length == 0) {
                 return Value.fromMap(Collections.emptyMap());
             }
-            
+
             if (buffer.remaining() < 2) {
-                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for MAP key/value type codes.");
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for MAP key/value type codes.");
             }
             var keyType = TypeCode.fromByte(buffer.get());
             var valueType = TypeCode.fromByte(buffer.get());
@@ -488,20 +317,17 @@ public interface TypeHandler {
 
             var keyHandler = keyType.getHandler();
             var valueHandler = valueType.getHandler();
-            
+
+            //Let handlers consume directly from buffer
             for (int i = 0; i < length; i++) {
-                var keyBytes = keyHandler.readValueBytes(buffer);
-                keyBytes.order(buffer.order());
-                var keyValue = keyHandler.deserialize(keyBytes);
+                var keyValue = keyHandler.deserialize(buffer);// Advances buffer
                 var key = MapKey.fromValue(keyValue);
-                
-                var valueBytes = valueHandler.readValueBytes(buffer);
-                valueBytes.order(buffer.order());
-                var mapInternalValue = valueHandler.deserialize(valueBytes);
-                
+
+                var mapInternalValue = valueHandler.deserialize(buffer);//Advances buffer
+
                 map.put(key, mapInternalValue);
             }
-            
+
             return Value.fromMap(map);
         }
         
@@ -562,50 +388,6 @@ public interface TypeHandler {
             return mapSize;
         }
 
-        @Override
-        public ByteBuffer readValueBytes(ByteBuffer buffer) throws ImprintException {
-            return readComplexValueBytes(buffer, "MAP", (tempBuffer, numEntries) -> {
-                if (tempBuffer.remaining() < 2) {
-                    throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
-                            "Not enough bytes for MAP key/value type codes");
-                }
-                byte keyTypeCodeByte = tempBuffer.get();
-                byte valueTypeCodeByte = tempBuffer.get();
-                var keyType = TypeCode.fromByte(keyTypeCodeByte);
-                var valueType = TypeCode.fromByte(valueTypeCodeByte);
-
-                int keySize = getFixedTypeSize(keyType);
-                int valueSize = getFixedTypeSize(valueType);
-
-                if (keySize > 0 && valueSize > 0) {
-                    return 2 + (numEntries * (keySize + valueSize));
-                } else {
-                    // At least one is variable-size: fall back to traversal
-                    int entriesDataLength = 0;
-                    for (int i = 0; i < numEntries; i++) {
-                        int entryStartPos = tempBuffer.position();
-                        keyType.getHandler().readValueBytes(tempBuffer);
-                        valueType.getHandler().readValueBytes(tempBuffer);
-                        entriesDataLength += (tempBuffer.position() - entryStartPos);
-                    }
-                    return 2 + entriesDataLength;
-                }
-            });
-        }
-
-        private int getFixedTypeSize(TypeCode type) {
-            switch (type) {
-                case NULL: return 0;
-                case BOOL: return 1;
-                case INT32:
-                case FLOAT32: return 4;
-                case INT64:
-                case FLOAT64: return 8;
-                default: return -1; // Variable size
-            }
-        }
-
-        
         private void serializeMapKey(MapKey key, ByteBuffer buffer) throws ImprintException {
             switch (key.getTypeCode()) {
                 case INT32:
