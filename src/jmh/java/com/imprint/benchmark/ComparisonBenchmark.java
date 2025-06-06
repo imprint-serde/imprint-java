@@ -10,7 +10,6 @@ import com.imprint.core.ImprintWriter;
 import com.imprint.core.SchemaId;
 import com.imprint.types.MapKey;
 import com.imprint.types.Value;
-import lombok.NoArgsConstructor;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumReader;
@@ -38,8 +37,8 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
-@Warmup(iterations = 2, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
+@Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(1)
 @SuppressWarnings("unused")
 public class ComparisonBenchmark {
@@ -91,6 +90,7 @@ public class ComparisonBenchmark {
     }
 
     // ===== SERIALIZATION BENCHMARKS =====
+
     @Benchmark
     public void serializeImprint(Blackhole bh) throws Exception {
         ByteBuffer result = serializeWithImprint(testData);
@@ -133,12 +133,33 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    // ===== DESERIALIZATION BENCHMARKS =====
+    // ===== PARTIAL DESERIALIZATION (SETUP ONLY) =====
+// These benchmarks measure the cost of preparing a record for field access,
+// not the cost of accessing the actual data. This is important because
+//
+// 1. Imprint: Only parses header + stores raw directory bytes
+// 2. FlatBuffers: Only wraps the buffer with minimal validation
+// 3. Others (eager): Parse and construct all field objects upfront
+//
+// This comparison shows the advantage of lazy loading approaches when you
+// only need to access a subset of fields. In real streaming workloads,
+// records are often filtered/routed based on just a few key fields.
+//
+// For a fair "full deserialization" comparison, see FULL DESERIALIZATION BENCHMARKS.
+
     @Benchmark
-    public void deserializeImprint(Blackhole bh) throws Exception {
+    public void deserializeSetupImprint(Blackhole bh) throws Exception {
         ImprintRecord result = ImprintRecord.deserialize(imprintBytesBuffer.duplicate());
         bh.consume(result);
     }
+
+    @Benchmark
+    public void deserializeSetupFlatBuffers(Blackhole bh) {
+        TestRecordFB result = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
+        bh.consume(result);
+    }
+
+    // ===== FULL DESERIALIZATION BENCHMARKS =====
 
     @Benchmark
     public void deserializeJacksonJson(Blackhole bh) throws Exception {
@@ -173,13 +194,53 @@ public class ComparisonBenchmark {
     }
 
     @Benchmark
+    public void deserializeImprint(Blackhole bh) throws Exception {
+        ImprintRecord result = ImprintRecord.deserialize(imprintBytesBuffer.duplicate());
+        // Access all fields to force full deserialization
+        result.getInt32(1);        // id
+        result.getString(2);       // name
+        result.getFloat64(3);      // price
+        result.getBoolean(4);      // active
+        result.getString(5);       // category
+        result.getArray(6);        // tags
+        result.getMap(7);          // metadata
+        for (int i = 8; i < 21; i++) {
+            result.getString(i);   // extraData fields
+        }
+
+        bh.consume(result);
+    }
+
+    @Benchmark
     public void deserializeFlatBuffers(Blackhole bh) {
         TestRecordFB result = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
+
+        // Access all fields
+        result.id();
+        result.name();
+        result.price();
+        result.active();
+        result.category();
+        // Access all tags
+        for (int i = 0; i < result.tagsLength(); i++) {
+            result.tags(i);
+        }
+        // Access all metadata
+        for (int i = 0; i < result.metadataKeysLength(); i++) {
+            result.metadataKeys(i);
+            result.metadataValues(i);
+        }
+        // Access all extra data
+        for (int i = 0; i < result.extraDataLength(); i++) {
+            result.extraData(i);
+        }
+
         bh.consume(result);
     }
 
     // ===== FIELD ACCESS BENCHMARKS =====
-    // Tests accessing a single field near the end of a large record
+    // Tests accessing a single field near the end of a record
+
     @Benchmark
     public void singleFieldAccessImprint(Blackhole bh) throws Exception {
         ImprintRecord record = ImprintRecord.deserialize(imprintBytesBuffer.duplicate());
@@ -210,19 +271,19 @@ public class ComparisonBenchmark {
     @Benchmark
     public void singleFieldAccessAvro(Blackhole bh) throws Exception {
         GenericRecord record = deserializeWithAvro(avroBytes);
-        bh.consume(record.get("extraData4"));
+        bh.consume(record.get("extraData4")); // Accessing field near end
     }
 
     @Benchmark
     public void singleFieldAccessProtobuf(Blackhole bh) throws Exception {
         TestRecordProto.TestRecord record = TestRecordProto.TestRecord.parseFrom(protobufBytes);
-        bh.consume(record.getExtraData(4));
+        bh.consume(record.getExtraData(4)); // Accessing field near end
     }
 
     @Benchmark
     public void singleFieldAccessFlatBuffers(Blackhole bh) {
         TestRecordFB record = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
-        bh.consume(record.extraData(4));
+        bh.consume(record.extraData(4)); // Accessing field near end - zero copy!
     }
 
     // ===== SIZE COMPARISON =====
@@ -264,7 +325,7 @@ public class ComparisonBenchmark {
 
     // ===== MERGE SIMULATION BENCHMARKS =====
 
-    @Benchmark
+    //@Benchmark
     public void mergeImprint(Blackhole bh) throws Exception {
         var record1Buffer = imprintBytesBuffer.duplicate();
         var record2Data = createTestRecord2();
@@ -277,7 +338,7 @@ public class ComparisonBenchmark {
         bh.consume(merged);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeJacksonJson(Blackhole bh) throws Exception {
         var record1 = jacksonJsonMapper.readValue(jacksonJsonBytes, TestRecord.class);
         var record2Data = createTestRecord2();
@@ -289,7 +350,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeKryo(Blackhole bh) {
         Input input1 = new Input(new ByteArrayInputStream(kryoBytes));
         var record1 = kryo.readObject(input1, TestRecord.class);
@@ -306,7 +367,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeMessagePack(Blackhole bh) throws Exception {
         var record1 = messagePackMapper.readValue(messagePackBytes, TestRecord.class);
         var record2Data = createTestRecord2();
@@ -318,7 +379,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeAvro(Blackhole bh) throws Exception {
         var record1 = deserializeWithAvro(avroBytes);
         var record2Data = createTestRecord2();
@@ -330,7 +391,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeProtobuf(Blackhole bh) throws Exception {
         var record1 = TestRecordProto.TestRecord.parseFrom(protobufBytes);
         var record2Data = createTestRecord2();
@@ -342,7 +403,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeFlatBuffers(Blackhole bh) {
         var record1 = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
         var record2Data = createTestRecord2();
@@ -691,8 +752,8 @@ public class ComparisonBenchmark {
         FlatBufferBuilder builder = new FlatBufferBuilder(1024);
 
         // Use second record's values if they exist, otherwise first record's values
-        String name = second.name() != null && !Objects.requireNonNull(second.name()).isEmpty() ? second.name() : first.name();
-        String category = second.category() != null && !Objects.requireNonNull(second.category()).isEmpty() ? second.category() : first.category();
+        String name = second.name() != null && !second.name().isEmpty() ? second.name() : first.name();
+        String category = second.category() != null && !second.category().isEmpty() ? second.category() : first.category();
         double price = second.price() != 0.0 ? second.price() : first.price();
         boolean active = second.active(); // Use second's boolean value
         int id = first.id(); // Keep first record's ID
@@ -806,7 +867,6 @@ public class ComparisonBenchmark {
     }
 
     // Test data class for other serialization libraries
-    @NoArgsConstructor
     public static class TestRecord {
         public int id;
         public String name;
@@ -815,7 +875,8 @@ public class ComparisonBenchmark {
         public String category;
         public List<String> tags = new ArrayList<>();
         public Map<String, String> metadata = new HashMap<>();
-        // Fields 8-20 for large record test
-        public List<String> extraData = new ArrayList<>();
+        public List<String> extraData = new ArrayList<>(); // Fields 8-20 for large record test
+
+        public TestRecord() {} // Required for deserialization
     }
 }

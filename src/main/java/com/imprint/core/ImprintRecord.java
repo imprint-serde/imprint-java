@@ -11,87 +11,127 @@ import lombok.Getter;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
- * An Imprint record containing a header, field directory, and payload.
- * Uses ByteBuffer for zero-copy operations to achieve low latency.
- *
- * <p><strong>Performance Note:</strong> All ByteBuffers should be array-backed
- * (hasArray() == true) for optimal zero-copy performance. Direct buffers
- * may cause performance degradation.</p>
+ * An Imprint record containing a header and buffer management.
+ * Delegates all buffer operations to ImprintBuffers for cleaner separation.
  */
 @Getter
 public final class ImprintRecord {
     private final Header header;
-    private final List<DirectoryEntry> directory;
-    private final ByteBuffer payload; // Read-only view for zero-copy
+    private final ImprintBuffers buffers;
 
     /**
-     * Creates a new ImprintRecord.
-     *
-     * @param payload the payload buffer. Should be array-backed for optimal performance.
+     * Creates a record from deserialized components.
      */
-    public ImprintRecord(Header header, List<DirectoryEntry> directory, ByteBuffer payload) {
+    private ImprintRecord(Header header, ImprintBuffers buffers) {
         this.header = Objects.requireNonNull(header, "Header cannot be null");
-        this.directory = Collections.unmodifiableList(Objects.requireNonNull(directory, "Directory cannot be null"));
-        this.payload = payload.asReadOnlyBuffer(); // Zero-copy read-only view
+        this.buffers = Objects.requireNonNull(buffers, "Buffers cannot be null");
     }
+
+    /**
+     * Creates a record from pre-parsed directory (used by ImprintWriter).
+     */
+    ImprintRecord(Header header, List<DirectoryEntry> directory, ByteBuffer payload) {
+        this.header = Objects.requireNonNull(header, "Header cannot be null");
+        this.buffers = new ImprintBuffers(directory, payload);
+    }
+
+    // ========== FIELD ACCESS METHODS ==========
 
     /**
      * Get a value by field ID, deserializing it on demand.
      * Returns null if the field is not found.
-     * Note: If the field exists and is an explicit NULL type, this will return Value.NullValue.INSTANCE
      */
     public Value getValue(int fieldId) throws ImprintException {
-        var fieldBuffer = getFieldBuffer(fieldId);
-        if (fieldBuffer == null) {
+        var entry = buffers.findDirectoryEntry(fieldId);
+        if (entry == null)
             return null;
-        }
 
-        int directoryIndex = findDirectoryIndex(fieldId);
-        if (directoryIndex < 0) {
-            throw new ImprintException(ErrorType.INTERNAL_ERROR, "Field ID " + fieldId + " found buffer but not in directory.");
-        }
-        var entry = directory.get(directoryIndex);
+        var fieldBuffer = buffers.getFieldBuffer(fieldId);
+        if (fieldBuffer == null)
+            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Failed to get buffer for field " + fieldId);
+
         return deserializeValue(entry.getTypeCode(), fieldBuffer);
     }
 
     /**
-     * Get the raw bytes for a field without deserializing.
-     * Returns a zero-copy ByteBuffer view, or null if field not found.
+     * Get raw bytes for a field without deserializing.
      */
     public ByteBuffer getRawBytes(int fieldId) {
-        var fieldBuffer = getFieldBuffer(fieldId);
-        return fieldBuffer != null ? fieldBuffer.asReadOnlyBuffer() : null;
+        try {
+            return buffers.getFieldBuffer(fieldId);
+        } catch (ImprintException e) {
+            return null;
+        }
     }
 
     /**
-     * Get a ByteBuffer view of a field's data.
-     * Returns null if the field is not found.
+     * Get the directory (parsing it if necessary).
      */
-    private ByteBuffer getFieldBuffer(int fieldId) {
-        int index = findDirectoryIndex(fieldId);
-        if (index < 0) return null;
-
-        var entry = directory.get(index);
-        int startOffset = entry.getOffset();
-        int endOffset = (index + 1 < directory.size()) ?
-                directory.get(index + 1).getOffset() : payload.limit();
-
-        if (startOffset > payload.limit() || endOffset > payload.limit() || startOffset > endOffset) {
-            return null;
-        }
-
-        //Single allocation instead of duplicate + slice
-        var fieldBuffer = payload.duplicate();
-        fieldBuffer.position(startOffset).limit(endOffset);
-        return fieldBuffer;
+    public List<DirectoryEntry> getDirectory() {
+        return buffers.getDirectory();
     }
+
+    // ========== TYPED GETTERS ==========
+
+    public boolean getBoolean(int fieldId) throws ImprintException {
+        return getTypedValueOrThrow(fieldId, TypeCode.BOOL, Value.BoolValue.class, "boolean").getValue();
+    }
+
+    public int getInt32(int fieldId) throws ImprintException {
+        return getTypedValueOrThrow(fieldId, TypeCode.INT32, Value.Int32Value.class, "int32").getValue();
+    }
+
+    public long getInt64(int fieldId) throws ImprintException {
+        return getTypedValueOrThrow(fieldId, TypeCode.INT64, Value.Int64Value.class, "int64").getValue();
+    }
+
+    public float getFloat32(int fieldId) throws ImprintException {
+        return getTypedValueOrThrow(fieldId, TypeCode.FLOAT32, Value.Float32Value.class, "float32").getValue();
+    }
+
+    public double getFloat64(int fieldId) throws ImprintException {
+        return getTypedValueOrThrow(fieldId, TypeCode.FLOAT64, Value.Float64Value.class, "float64").getValue();
+    }
+
+    public String getString(int fieldId) throws ImprintException {
+        var value = getValidatedValue(fieldId, "STRING");
+        if (value instanceof Value.StringValue)
+            return ((Value.StringValue) value).getValue();
+        if (value instanceof Value.StringBufferValue)
+            return ((Value.StringBufferValue) value).getValue();
+        throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is not a STRING");
+    }
+
+    public byte[] getBytes(int fieldId) throws ImprintException {
+        var value = getValidatedValue(fieldId, "BYTES");
+        if (value instanceof Value.BytesValue)
+            return ((Value.BytesValue) value).getValue();
+        if (value instanceof Value.BytesBufferValue)
+            return ((Value.BytesBufferValue) value).getValue();
+        throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is not BYTES");
+    }
+
+    public List<Value> getArray(int fieldId) throws ImprintException {
+        return getTypedValueOrThrow(fieldId, TypeCode.ARRAY, Value.ArrayValue.class, "ARRAY").getValue();
+    }
+
+    public Map<MapKey, Value> getMap(int fieldId) throws ImprintException {
+        return getTypedValueOrThrow(fieldId, TypeCode.MAP, Value.MapValue.class, "MAP").getValue();
+    }
+
+    public ImprintRecord getRow(int fieldId) throws ImprintException {
+        return getTypedValueOrThrow(fieldId, TypeCode.ROW, Value.RowValue.class, "ROW").getValue();
+    }
+
+    // ========== SERIALIZATION ==========
 
     /**
      * Serialize this record to a ByteBuffer.
-     * The returned buffer will be array-backed.
      */
     public ByteBuffer serializeToBuffer() {
         var buffer = ByteBuffer.allocate(estimateSerializedSize());
@@ -100,171 +140,95 @@ public final class ImprintRecord {
         // Write header
         serializeHeader(buffer);
 
-        // Write directory (always present)
-        VarInt.encode(directory.size(), buffer);
-        for (var entry : directory) {
-            serializeDirectoryEntry(entry, buffer);
-        }
+        // Write directory
+        var directoryBuffer = buffers.serializeDirectory();
+        buffer.put(directoryBuffer);
 
-        // Write payload (shallow copy only)
+        // Write payload
+        var payload = buffers.getPayload();
         var payloadCopy = payload.duplicate();
         buffer.put(payloadCopy);
 
-        // Prepare buffer for reading
         buffer.flip();
         return buffer;
     }
 
-    /**
-     * Create a fluent builder for constructing ImprintRecord instances.
-     *
-     * @param schemaId the schema identifier for this record
-     * @return a new builder instance
-     */
+    public int estimateSerializedSize() {
+        int size = Constants.HEADER_BYTES; // header
+        size += buffers.serializeDirectory().remaining(); // directory
+        size += buffers.getPayload().remaining(); // payload
+        return size;
+    }
+
+    // ========== STATIC FACTORY METHODS ==========
+
     public static ImprintRecordBuilder builder(SchemaId schemaId) {
         return new ImprintRecordBuilder(schemaId);
     }
 
-    /**
-     * Create a fluent builder for constructing ImprintRecord instances.
-     *
-     * @param fieldspaceId the fieldspace identifier
-     * @param schemaHash the schema hash
-     * @return a new builder instance
-     */
-    @SuppressWarnings("unused")
     public static ImprintRecordBuilder builder(int fieldspaceId, int schemaHash) {
         return new ImprintRecordBuilder(new SchemaId(fieldspaceId, schemaHash));
     }
 
-    /**
-     * Deserialize a record from bytes through an array backed ByteBuffer.
-     */
     public static ImprintRecord deserialize(byte[] bytes) throws ImprintException {
         return deserialize(ByteBuffer.wrap(bytes));
     }
 
-    /**
-     * Deserialize a record from a ByteBuffer.
-     *
-     * @param buffer the buffer to deserialize from. Must be array-backed
-     *               (buffer.hasArray() == true) for optimal zero-copy performance.
-     */
     public static ImprintRecord deserialize(ByteBuffer buffer) throws ImprintException {
         buffer = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
 
         // Read header
         var header = deserializeHeader(buffer);
 
-        // Read directory (always present)
-        var directory = new ArrayList<DirectoryEntry>();
-        VarInt.DecodeResult countResult = VarInt.decode(buffer);
+        // Calculate directory size
+        int directoryStartPos = buffer.position();
+        var countResult = VarInt.decode(buffer);
         int directoryCount = countResult.getValue();
+        int directorySize = countResult.getBytesRead() + (directoryCount * Constants.DIR_ENTRY_BYTES);
 
-        for (int i = 0; i < directoryCount; i++) {
-            directory.add(deserializeDirectoryEntry(buffer));
-        }
+        // Create directory buffer
+        buffer.position(directoryStartPos);
+        var directoryBuffer = buffer.slice();
+        directoryBuffer.limit(directorySize);
 
-        // Read payload as ByteBuffer slice for zero-copy
+        // Advance past directory
+        buffer.position(buffer.position() + directorySize);
+
+        // Create payload buffer
         var payload = buffer.slice();
         payload.limit(header.getPayloadSize());
-        buffer.position(buffer.position() + header.getPayloadSize());
 
-        return new ImprintRecord(header, directory, payload);
+        // Create buffers wrapper
+        var buffers = new ImprintBuffers(directoryBuffer, payload);
+
+        return new ImprintRecord(header, buffers);
     }
+
+    // ========== PRIVATE HELPER METHODS ==========
 
     /**
-     * Binary search for field ID in directory without object allocation.
-     * Returns the index of the field if found, or a negative value if not found.
-     *
-     * @param fieldId the field ID to search for
-     * @return index if found, or negative insertion point - 1 if not found
+     * Get and validate a value exists and is not null.
      */
-    private int findDirectoryIndex(int fieldId) {
-        int low = 0;
-        int high = directory.size() - 1;
-
-        while (low <= high) {
-            int mid = (low + high) >>> 1; // unsigned right shift to avoid overflow
-            int midFieldId = directory.get(mid).getId();
-
-            if (midFieldId < fieldId) {
-                low = mid + 1;
-            } else if (midFieldId > fieldId) {
-                high = mid - 1;
-            } else {
-                return mid; // field found
-            }
-        }
-        return -(low + 1); // field not found, return insertion point
+    private Value getValidatedValue(int fieldId, String typeName) throws ImprintException {
+        var value = getValue(fieldId);
+        if (value == null)
+            throw new ImprintException(ErrorType.FIELD_NOT_FOUND, "Field " + fieldId + " not found");
+        if (value.getTypeCode() == TypeCode.NULL)
+            throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is NULL, cannot retrieve as " + typeName);
+        return value;
     }
 
-    public int estimateSerializedSize() {
-        int size = Constants.HEADER_BYTES; // header
-        size += VarInt.encodedLength(directory.size()); // directory count
-        size += directory.size() * Constants.DIR_ENTRY_BYTES; // directory entries
-        size += payload.remaining(); // payload
-        return size;
-    }
-
-    private void serializeHeader(ByteBuffer buffer) {
-        buffer.put(Constants.MAGIC);
-        buffer.put(Constants.VERSION);
-        buffer.put(header.getFlags().getValue());
-        buffer.putInt(header.getSchemaId().getFieldSpaceId());
-        buffer.putInt(header.getSchemaId().getSchemaHash());
-        buffer.putInt(header.getPayloadSize());
-    }
-
-    private static Header deserializeHeader(ByteBuffer buffer) throws ImprintException {
-        if (buffer.remaining() < Constants.HEADER_BYTES) {
-            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
-                    "Not enough bytes for header");
-        }
-
-        byte magic = buffer.get();
-        if (magic != Constants.MAGIC) {
-            throw new ImprintException(ErrorType.INVALID_MAGIC,
-                    "Invalid magic byte: expected 0x" + Integer.toHexString(Constants.MAGIC) +
-                            ", got 0x" + Integer.toHexString(magic & 0xFF));
-        }
-
-        byte version = buffer.get();
-        if (version != Constants.VERSION) {
-            throw new ImprintException(ErrorType.UNSUPPORTED_VERSION,
-                    "Unsupported version: " + version);
-        }
-
-        var flags = new Flags(buffer.get());
-        int fieldspaceId = buffer.getInt();
-        int schemaHash = buffer.getInt();
-        int payloadSize = buffer.getInt();
-
-        return new Header(flags, new SchemaId(fieldspaceId, schemaHash), payloadSize);
-    }
-
-    private void serializeDirectoryEntry(DirectoryEntry entry, ByteBuffer buffer) {
-        buffer.putShort(entry.getId());
-        buffer.put(entry.getTypeCode().getCode());
-        buffer.putInt(entry.getOffset());
-    }
-
-    private static DirectoryEntry deserializeDirectoryEntry(ByteBuffer buffer) throws ImprintException {
-        if (buffer.remaining() < Constants.DIR_ENTRY_BYTES) {
-            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
-                    "Not enough bytes for directory entry");
-        }
-
-        short id = buffer.getShort();
-        var typeCode = TypeCode.fromByte(buffer.get());
-        int offset = buffer.getInt();
-
-        return new DirectoryEntry(id, typeCode, offset);
+    private <T extends Value> T getTypedValueOrThrow(int fieldId, TypeCode expectedTypeCode, Class<T> expectedValueClass, String expectedTypeName)
+            throws ImprintException {
+        var value = getValidatedValue(fieldId, expectedTypeName);
+        if (value.getTypeCode() == expectedTypeCode && expectedValueClass.isInstance(value))
+            return expectedValueClass.cast(value);
+        throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is of type " + value.getTypeCode() + ", expected " + expectedTypeName);
     }
 
     private Value deserializeValue(TypeCode typeCode, ByteBuffer buffer) throws ImprintException {
-        var valueSpecificBuffer = buffer.duplicate();
-        valueSpecificBuffer.order(ByteOrder.LITTLE_ENDIAN);
+        var valueBuffer = buffer.duplicate();
+        valueBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
         switch (typeCode) {
             case NULL:
@@ -277,162 +241,51 @@ public final class ImprintRecord {
             case STRING:
             case ARRAY:
             case MAP:
-                return typeCode.getHandler().deserialize(valueSpecificBuffer);
+                return typeCode.getHandler().deserialize(valueBuffer);
             case ROW:
-                var nestedRecord = deserialize(valueSpecificBuffer);
+                var nestedRecord = deserialize(valueBuffer);
                 return Value.fromRow(nestedRecord);
-
             default:
                 throw new ImprintException(ErrorType.INVALID_TYPE_CODE, "Unknown type code: " + typeCode);
         }
     }
 
-    private <T extends Value> T getTypedValueOrThrow(int fieldId, TypeCode expectedTypeCode, Class<T> expectedValueClass, String expectedTypeName) throws ImprintException {
-        var value = getValue(fieldId);
-
-        if (value == null) {
-            throw new ImprintException(ErrorType.FIELD_NOT_FOUND,
-                    "Field " + fieldId + " not found, cannot retrieve as " + expectedTypeName + ".");
-        }
-
-        if (value.getTypeCode() == TypeCode.NULL) {
-            throw new ImprintException(ErrorType.TYPE_MISMATCH,
-                    "Field " + fieldId + " is NULL, cannot retrieve as " + expectedTypeName + ".");
-        }
-
-        if (value.getTypeCode() == expectedTypeCode && expectedValueClass.isInstance(value)) {
-            return expectedValueClass.cast(value);
-        }
-
-        throw new ImprintException(ErrorType.TYPE_MISMATCH,
-                "Field " + fieldId + " is of type " + value.getTypeCode() + ", expected " + expectedTypeName + ".");
+    private void serializeHeader(ByteBuffer buffer) {
+        buffer.put(Constants.MAGIC);
+        buffer.put(Constants.VERSION);
+        buffer.put(header.getFlags().getValue());
+        buffer.putInt(header.getSchemaId().getFieldSpaceId());
+        buffer.putInt(header.getSchemaId().getSchemaHash());
+        buffer.putInt(header.getPayloadSize());
     }
 
-    /**
-     * Retrieves the boolean value for the given field ID.
-     * @throws ImprintException if the field is not found, is null, or is not of type BOOL.
-     */
-    public boolean getBoolean(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, TypeCode.BOOL, Value.BoolValue.class, "boolean").getValue();
-    }
+    private static Header deserializeHeader(ByteBuffer buffer) throws ImprintException {
+        if (buffer.remaining() < Constants.HEADER_BYTES)
+            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for header");
 
-    /**
-     * Retrieves the int (int32) value for the given field ID.
-     * @throws ImprintException if the field is not found, is null, or is not of type INT32.
-     */
-    public int getInt32(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, TypeCode.INT32, Value.Int32Value.class, "int32").getValue();
-    }
 
-    /**
-     * Retrieves the long (int64) value for the given field ID.
-     * @throws ImprintException if the field is not found, is null, or is not of type INT64.
-     */
-    public long getInt64(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, TypeCode.INT64, Value.Int64Value.class, "int64").getValue();
-    }
-
-    /**
-     * Retrieves the float (float32) value for the given field ID.
-     * @throws ImprintException if the field is not found, is null, or is not of type FLOAT32.
-     */
-    public float getFloat32(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, TypeCode.FLOAT32, Value.Float32Value.class, "float32").getValue();
-    }
-
-    /**
-     * Retrieves the double (float64) value for the given field ID.
-     * @throws ImprintException if the field is not found, is null, or is not of type FLOAT64.
-     */
-    public double getFloat64(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, TypeCode.FLOAT64, Value.Float64Value.class, "float64").getValue();
-    }
-
-    /**
-     * Retrieves the String value for the given field ID.
-     * @throws ImprintException if the field is not found, is null, or is not of type STRING.
-     */
-    public String getString(int fieldId) throws ImprintException {
-        var value = getValue(fieldId);
-
-        if (value == null) {
-            throw new ImprintException(ErrorType.FIELD_NOT_FOUND,
-                    "Field " + fieldId + " not found, cannot retrieve as String.");
-        }
-        if (value.getTypeCode() == TypeCode.NULL) {
-            throw new ImprintException(ErrorType.TYPE_MISMATCH,
-                    "Field " + fieldId + " is NULL, cannot retrieve as String.");
+        byte magic = buffer.get();
+        if (magic != Constants.MAGIC) {
+            throw new ImprintException(ErrorType.INVALID_MAGIC, "Invalid magic byte: expected 0x" + Integer.toHexString(Constants.MAGIC) +
+                            ", got 0x" + Integer.toHexString(magic & 0xFF));
         }
 
-        if (value instanceof Value.StringValue) {
-            return ((Value.StringValue) value).getValue();
-        }
-        if (value instanceof Value.StringBufferValue) {
-            return ((Value.StringBufferValue) value).getValue();
+        byte version = buffer.get();
+        if (version != Constants.VERSION) {
+            throw new ImprintException(ErrorType.UNSUPPORTED_VERSION, "Unsupported version: " + version);
         }
 
-        throw new ImprintException(ErrorType.TYPE_MISMATCH,
-                "Field " + fieldId + " is of type " + value.getTypeCode() + ", expected STRING.");
-    }
+        var flags = new Flags(buffer.get());
+        int fieldSpaceId = buffer.getInt();
+        int schemaHash = buffer.getInt();
+        int payloadSize = buffer.getInt();
 
-    /**
-     * Retrieves the byte array (byte[]) value for the given field ID.
-     * Note: This may involve a defensive copy depending on the underlying Value type.
-     * @throws ImprintException if the field is not found, is null, or is not of type BYTES.
-     */
-    public byte[] getBytes(int fieldId) throws ImprintException {
-        Value value = getValue(fieldId);
-
-        if (value == null) {
-            throw new ImprintException(ErrorType.FIELD_NOT_FOUND,
-                    "Field " + fieldId + " not found, cannot retrieve as byte[].");
-        }
-        if (value.getTypeCode() == TypeCode.NULL) {
-            throw new ImprintException(ErrorType.TYPE_MISMATCH,
-                    "Field " + fieldId + " is NULL, cannot retrieve as byte[].");
-        }
-
-        if (value instanceof Value.BytesValue) {
-            return ((Value.BytesValue) value).getValue(); // getValue() in BytesValue returns a clone
-        }
-        if (value instanceof Value.BytesBufferValue) {
-            return ((Value.BytesBufferValue) value).getValue(); // getValue() in BytesBufferValue creates a new array
-        }
-
-        throw new ImprintException(ErrorType.TYPE_MISMATCH,
-                "Field " + fieldId + " is of type " + value.getTypeCode() + ", expected BYTES.");
-    }
-
-    /**
-     * Retrieves the List<Value> for the given field ID.
-     * The list itself is a copy; modifications to it will not affect the record.
-     * @throws ImprintException if the field is not found, is null, or is not of type ARRAY.
-     */
-    public List<Value> getArray(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, TypeCode.ARRAY, Value.ArrayValue.class, "ARRAY").getValue();
-    }
-
-    /**
-     * Retrieves the Map<MapKey, Value> for the given field ID.
-     * The map itself is a copy; modifications to it will not affect the record.
-     * @throws ImprintException if the field is not found, is null, or is not of type MAP.
-     */
-    public Map<MapKey, Value> getMap(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, TypeCode.MAP, Value.MapValue.class, "MAP").getValue();
-    }
-
-    /**
-     * Retrieves the nested ImprintRecord for the given field ID.
-     * @throws ImprintException if the field is not found, is null, or is not of type ROW.
-     */
-    public ImprintRecord getRow(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, TypeCode.ROW, Value.RowValue.class, "ROW").getValue();
+        return new Header(flags, new SchemaId(fieldSpaceId, schemaHash), payloadSize);
     }
 
     @Override
     public String toString() {
         return String.format("ImprintRecord{header=%s, directorySize=%d, payloadSize=%d}",
-                header, directory.size(), payload.remaining());
+                header, buffers.getDirectoryCount(), buffers.getPayload().remaining());
     }
-
 }
