@@ -133,19 +133,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    // ===== PARTIAL DESERIALIZATION (SETUP ONLY) =====
-// These benchmarks measure the cost of preparing a record for field access,
-// not the cost of accessing the actual data. This is important because
-//
-// 1. Imprint: Only parses header + stores raw directory bytes
-// 2. FlatBuffers: Only wraps the buffer with minimal validation
-// 3. Others (eager): Parse and construct all field objects upfront
-//
-// This comparison shows the advantage of lazy loading approaches when you
-// only need to access a subset of fields. In real streaming workloads,
-// records are often filtered/routed based on just a few key fields.
-//
-// For a fair "full deserialization" comparison, see FULL DESERIALIZATION BENCHMARKS.
+    // ===== SETUP ONLY =====
 
     @Benchmark
     public void deserializeSetupImprint(Blackhole bh) throws Exception {
