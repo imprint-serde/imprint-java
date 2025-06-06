@@ -259,19 +259,19 @@ public class ComparisonBenchmark {
     @Benchmark
     public void singleFieldAccessAvro(Blackhole bh) throws Exception {
         GenericRecord record = deserializeWithAvro(avroBytes);
-        bh.consume(record.get("extraData4")); // Accessing field near end
+        bh.consume(record.get("extraData4"));
     }
 
     @Benchmark
     public void singleFieldAccessProtobuf(Blackhole bh) throws Exception {
         TestRecordProto.TestRecord record = TestRecordProto.TestRecord.parseFrom(protobufBytes);
-        bh.consume(record.getExtraData(4)); // Accessing field near end
+        bh.consume(record.getExtraData(4));
     }
 
     @Benchmark
     public void singleFieldAccessFlatBuffers(Blackhole bh) {
         TestRecordFB record = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
-        bh.consume(record.extraData(4)); // Accessing field near end - zero copy!
+        bh.consume(record.extraData(4));
     }
 
     // ===== SIZE COMPARISON =====
