@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, dev ]
+    branches: [ main ]
 
 jobs:
   test:
@@ -42,107 +42,3 @@ jobs:
 
       - name: Run build
         run: ./gradlew build
-
-  benchmark:
-    runs-on: ubuntu-latest
-    needs: test
-    # Only run benchmarks on main branch pushes and PRs to main to avoid excessive CI time
-    if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 11
-        uses: actions/setup-java@v4
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-
-      - name: Cache Gradle dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
-
-      - name: Create benchmark results directory
-        run: mkdir -p benchmark-results
-
-      - name: Run serialization benchmarks
-        run: ./gradlew jmhRunSerializationBenchmarks
-        continue-on-error: true
-
-      - name: Run deserialization benchmarks
-        run: ./gradlew jmhRunDeserializationBenchmarks
-        continue-on-error: true
-
-      - name: Run field access benchmarks
-        run: ./gradlew jmhRunFieldAccessBenchmarks
-        continue-on-error: true
-
-      - name: Run size comparison benchmarks
-        run: ./gradlew jmhRunSizeComparisonBenchmarks
-        continue-on-error: true
-
-      - name: List benchmark results
-        run: |
-          echo "Contents of benchmark-results directory:"
-          ls -la benchmark-results/ || echo "benchmark-results directory not found"
-          echo "Working directory contents:"
-          ls -la
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: benchmark-results-${{ github.sha }}
-          path: benchmark-results/
-          retention-days: 30
-
-  # Optional: Run full benchmark suite on releases
-  benchmark-full:
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 11
-        uses: actions/setup-java@v4
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-
-      - name: Cache Gradle dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
-
-      - name: Create benchmark results directory
-        run: mkdir -p benchmark-results
-
-      - name: Run full benchmark suite
-        run: ./gradlew jmhRunAllBenchmarks
-
-      - name: Upload full benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-benchmark-results-${{ github.ref_name }}
-          path: benchmark-results/
-          retention-days: 90

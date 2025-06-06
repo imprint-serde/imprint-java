@@ -37,8 +37,8 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
-@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
+@Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(1)
 @SuppressWarnings("unused")
 public class ComparisonBenchmark {
@@ -325,7 +325,7 @@ public class ComparisonBenchmark {
 
     // ===== MERGE SIMULATION BENCHMARKS =====
 
-    @Benchmark
+    //@Benchmark
     public void mergeImprint(Blackhole bh) throws Exception {
         var record1Buffer = imprintBytesBuffer.duplicate();
         var record2Data = createTestRecord2();
@@ -338,7 +338,7 @@ public class ComparisonBenchmark {
         bh.consume(merged);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeJacksonJson(Blackhole bh) throws Exception {
         var record1 = jacksonJsonMapper.readValue(jacksonJsonBytes, TestRecord.class);
         var record2Data = createTestRecord2();
@@ -350,7 +350,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeKryo(Blackhole bh) {
         Input input1 = new Input(new ByteArrayInputStream(kryoBytes));
         var record1 = kryo.readObject(input1, TestRecord.class);
@@ -367,7 +367,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeMessagePack(Blackhole bh) throws Exception {
         var record1 = messagePackMapper.readValue(messagePackBytes, TestRecord.class);
         var record2Data = createTestRecord2();
@@ -379,7 +379,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeAvro(Blackhole bh) throws Exception {
         var record1 = deserializeWithAvro(avroBytes);
         var record2Data = createTestRecord2();
@@ -391,7 +391,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeProtobuf(Blackhole bh) throws Exception {
         var record1 = TestRecordProto.TestRecord.parseFrom(protobufBytes);
         var record2Data = createTestRecord2();
@@ -403,7 +403,7 @@ public class ComparisonBenchmark {
         bh.consume(result);
     }
 
-    @Benchmark
+    //@Benchmark
     public void mergeFlatBuffers(Blackhole bh) {
         var record1 = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
         var record2Data = createTestRecord2();
