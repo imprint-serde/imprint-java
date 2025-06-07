@@ -14,6 +14,7 @@ import java.nio.ByteOrder;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 
 /**
  * An Imprint record containing a header and buffer management.
@@ -38,6 +39,14 @@ public final class ImprintRecord {
     ImprintRecord(Header header, List<DirectoryEntry> directory, ByteBuffer payload) {
         this.header = Objects.requireNonNull(header, "Header cannot be null");
         this.buffers = new ImprintBuffers(directory, payload);
+    }
+
+    /**
+     * Creates a record from a pre-parsed and sorted directory map (used by ImprintRecordBuilder).
+     */
+    ImprintRecord(Header header, TreeMap<Integer, DirectoryEntry> directoryMap, ByteBuffer payload) {
+        this.header = Objects.requireNonNull(header, "Header cannot be null");
+        this.buffers = new ImprintBuffers(directoryMap, payload);
     }
 
     // ========== FIELD ACCESS METHODS ==========
@@ -190,7 +199,33 @@ public final class ImprintRecord {
      */
     public static ByteBuffer serialize(SchemaId schemaId, List<DirectoryEntry> directory, ByteBuffer payload) {
         var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
-        var directoryBuffer = createDirectoryBuffer(directory);
+        var directoryBuffer = ImprintBuffers.createDirectoryBuffer(directory);
+
+        int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
+        var finalBuffer = ByteBuffer.allocate(finalSize);
+        finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        // Assemble the final record
+        serializeHeader(header, finalBuffer);
+        finalBuffer.put(directoryBuffer);
+        finalBuffer.put(payload);
+
+        finalBuffer.flip();
+        return finalBuffer.asReadOnlyBuffer();
+    }
+
+    /**
+     * Serializes the components of a record into a single ByteBuffer using a pre-built directory map.
+     * This provides a direct serialization path without needing a live ImprintRecord instance.
+     *
+     * @param schemaId     The schema identifier for the record.
+     * @param directoryMap The map of directory entries, which must be sorted by field ID (e.g., a TreeMap).
+     * @param payload      The ByteBuffer containing all field data concatenated.
+     * @return A read-only ByteBuffer with the complete serialized record.
+     */
+    public static ByteBuffer serialize(SchemaId schemaId, TreeMap<Integer, DirectoryEntry> directoryMap, ByteBuffer payload) {
+        var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
+        var directoryBuffer = ImprintBuffers.createDirectoryBufferFromMap(directoryMap);
 
         int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
         var finalBuffer = ByteBuffer.allocate(finalSize);
@@ -326,30 +361,6 @@ public final class ImprintRecord {
         int payloadSize = buffer.getInt();
 
         return new Header(flags, new SchemaId(fieldSpaceId, schemaHash), payloadSize);
-    }
-
-    /**
-     * Creates a serialized representation of the directory.
-     */
-    private static ByteBuffer createDirectoryBuffer(List<DirectoryEntry> directory) {
-        try {
-            int bufferSize = VarInt.encodedLength(directory.size()) + (directory.size() * Constants.DIR_ENTRY_BYTES);
-            var buffer = ByteBuffer.allocate(bufferSize);
-            buffer.order(ByteOrder.LITTLE_ENDIAN);
-
-            VarInt.encode(directory.size(), buffer);
-            for (var entry : directory) {
-                buffer.putShort(entry.getId());
-                buffer.put(entry.getTypeCode().getCode());
-                buffer.putInt(entry.getOffset());
-            }
-
-            buffer.flip();
-            return buffer.asReadOnlyBuffer();
-        } catch (Exception e) {
-            // Should not happen with valid inputs
-            return ByteBuffer.allocate(0).asReadOnlyBuffer();
-        }
     }
 
     @Override
