@@ -4,6 +4,7 @@ import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import com.imprint.types.MapKey;
 import com.imprint.types.Value;
+import lombok.SneakyThrows;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -40,6 +41,7 @@ import java.util.TreeMap;
 public final class ImprintRecordBuilder {
     private final SchemaId schemaId;
     private final Map<Integer, Value> fields = new TreeMap<>();
+    private int estimatedPayloadSize = 0;
 
     ImprintRecordBuilder(SchemaId schemaId) {
         this.schemaId = Objects.requireNonNull(schemaId, "SchemaId cannot be null");
@@ -200,7 +202,14 @@ public final class ImprintRecordBuilder {
      */
     private ImprintRecordBuilder addField(int id, Value value) {
         Objects.requireNonNull(value, "Value cannot be null - use nullField() for explicit null values");
+
+        // Subtract the size of the old value if it's being replaced.
+        var oldValue = fields.get(id);
+        if (oldValue != null)
+            estimatedPayloadSize -= estimateValueSize(oldValue);
+
         fields.put(id, value);
+        estimatedPayloadSize += estimateValueSize(value);
         return this;
     }
 
@@ -287,14 +296,9 @@ public final class ImprintRecordBuilder {
         return String.format("ImprintRecordBuilder{schemaId=%s, fields=%d}", schemaId, fields.size());
     }
 
-    private int estimatePayloadSize() throws ImprintException {
-        // More accurate estimation to reduce allocations
-        int estimatedSize = 0;
-        for (var value : fields.values()) {
-            estimatedSize += estimateValueSize(value);
-        }
-        // Add 25% buffer to reduce reallocations
-        return Math.max(estimatedSize + (estimatedSize / 4), fields.size() * 16);
+    private int estimatePayloadSize() {
+        // Add 25% buffer to reduce reallocations and handle VarInt encoding fluctuations.
+        return Math.max(estimatedPayloadSize + (estimatedPayloadSize / 4), fields.size() * 16);
     }
     
     /**
@@ -305,7 +309,8 @@ public final class ImprintRecordBuilder {
      * @param value the value to estimate size for
      * @return estimated size in bytes including type-specific overhead
      */
-    private int estimateValueSize(Value value) throws ImprintException {
+    @SneakyThrows
+    private int estimateValueSize(Value value) {
         // Use TypeHandler for simple types
         switch (value.getTypeCode()) {
             case NULL:
