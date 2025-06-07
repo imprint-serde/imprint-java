@@ -27,7 +27,7 @@ import java.util.Random;
  * - String operations and UTF-8 encoding
  * - ByteBuffer operations
  */
-@Disabled("Enable manually for profiling")
+//@Disabled("Enable manually for profiling")
 public class ProfilerTest {
     
     private static final int ITERATIONS = 1_000_000;
@@ -82,12 +82,12 @@ public class ProfilerTest {
         Thread.sleep(3000);
         
         var schemaId = new SchemaId(1, 0x12345678);
-        
+
         System.out.println("Beginning serialization profiling...");
         long start = System.nanoTime();
         
         // Create and serialize many records (allocation hotspot)
-        for (int i = 0; i < 100_000; i++) {
+        for (int i = 0; i < 500_000; i++) {
             var writer = new ImprintWriter(schemaId);
             
             // Add various field types
