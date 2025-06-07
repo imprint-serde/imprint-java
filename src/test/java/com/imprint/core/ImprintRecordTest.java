@@ -24,12 +24,10 @@ class ImprintRecordTest {
     @Test
     void shouldCreateSimpleRecord() throws ImprintException {
         var schemaId = new SchemaId(1, 0xdeadbeef);
-        var writer = new ImprintWriter(schemaId);
-        
-        writer.addField(1, Value.fromInt32(42))
-              .addField(2, Value.fromString("hello"));
-
-        var record = writer.build();
+        var record = ImprintRecord.builder(schemaId)
+              .field(1, Value.fromInt32(42))
+              .field(2, Value.fromString("hello"))
+              .build();
         
         assertThat(record.getHeader().getSchemaId()).isEqualTo(schemaId);
         assertThat(record.getDirectory()).hasSize(2);
@@ -53,18 +51,16 @@ class ImprintRecordTest {
     @Test
     void shouldRoundtripThroughSerialization() throws ImprintException {
         var schemaId = new SchemaId(1, 0xdeadbeef);
-        var writer = new ImprintWriter(schemaId);
-        
-        writer.addField(1, Value.nullValue())
-              .addField(2, Value.fromBoolean(true))
-              .addField(3, Value.fromInt32(42))
-              .addField(4, Value.fromInt64(123456789L))
-              .addField(5, Value.fromFloat32(3.14f))
-              .addField(6, Value.fromFloat64(2.718281828))
-              .addField(7, Value.fromBytes(new byte[]{1, 2, 3, 4}))
-              .addField(8, Value.fromString("test string"));
-
-        var original = writer.build();
+        var original = ImprintRecord.builder(schemaId)
+              .field(1, Value.nullValue())
+              .field(2, Value.fromBoolean(true))
+              .field(3, Value.fromInt32(42))
+              .field(4, Value.fromInt64(123456789L))
+              .field(5, Value.fromFloat32(3.14f))
+              .field(6, Value.fromFloat64(2.718281828))
+              .field(7, Value.fromBytes(new byte[]{1, 2, 3, 4}))
+              .field(8, Value.fromString("test string"))
+              .build();
         
         // Serialize and deserialize
         var buffer = original.serializeToBuffer();
@@ -94,7 +90,6 @@ class ImprintRecordTest {
     @Test
     void shouldHandleArrays() throws ImprintException {
         var schemaId = new SchemaId(1, 0xdeadbeef);
-        var writer = new ImprintWriter(schemaId);
         
         List<Value> intArray = Arrays.asList(
             Value.fromInt32(1),
@@ -102,8 +97,9 @@ class ImprintRecordTest {
             Value.fromInt32(3)
         );
         
-        writer.addField(1, Value.fromArray(intArray));
-        ImprintRecord record = writer.build();
+        var record = ImprintRecord.builder(schemaId)
+            .field(1, Value.fromArray(intArray))
+            .build();
         
         // Serialize and deserialize
         var buffer = record.serializeToBuffer();
@@ -125,14 +121,14 @@ class ImprintRecordTest {
     @Test
     void shouldHandleMaps() throws ImprintException {
         var schemaId = new SchemaId(1, 0xdeadbeef);
-        var writer = new ImprintWriter(schemaId);
         
         var map = new HashMap<MapKey, Value>();
         map.put(MapKey.fromString("key1"), Value.fromInt32(1));
         map.put(MapKey.fromString("key2"), Value.fromInt32(2));
         
-        writer.addField(1, Value.fromMap(map));
-        var record = writer.build();
+        var record = ImprintRecord.builder(schemaId)
+            .field(1, Value.fromMap(map))
+            .build();
         
         // Serialize and deserialize
         var buffer = record.serializeToBuffer();
@@ -154,17 +150,17 @@ class ImprintRecordTest {
     void shouldHandleNestedRecords() throws ImprintException {
         // Create inner record
         var innerSchemaId = new SchemaId(2, 0xcafebabe);
-        var innerWriter = new ImprintWriter(innerSchemaId);
-        innerWriter.addField(1, Value.fromInt32(42))
-                   .addField(2, Value.fromString("nested"));
-        var innerRecord = innerWriter.build();
+        var innerRecord = ImprintRecord.builder(innerSchemaId)
+                   .field(1, Value.fromInt32(42))
+                   .field(2, Value.fromString("nested"))
+                   .build();
         
         // Create outer record containing inner record
         var outerSchemaId = new SchemaId(1, 0xdeadbeef);
-        var outerWriter = new ImprintWriter(outerSchemaId);
-        outerWriter.addField(1, Value.fromRow(innerRecord))
-                   .addField(2, Value.fromInt64(123L));
-        var outerRecord = outerWriter.build();
+        var outerRecord = ImprintRecord.builder(outerSchemaId)
+                   .field(1, Value.fromRow(innerRecord))
+                   .field(2, Value.fromInt64(123L))
+                   .build();
         
         // Serialize and deserialize
         var buffer = outerRecord.serializeToBuffer();
@@ -218,13 +214,12 @@ class ImprintRecordTest {
     @Test
     void shouldHandleDuplicateFieldIds() throws ImprintException {
         var schemaId = new SchemaId(1, 0xdeadbeef);
-        var writer = new ImprintWriter(schemaId);
         
         // Add duplicate field IDs - last one should win
-        writer.addField(1, Value.fromInt32(42))
-              .addField(1, Value.fromInt32(43));
-
-        var record = writer.build();
+        var record = ImprintRecord.builder(schemaId)
+              .field(1, Value.fromInt32(42))
+              .field(1, Value.fromInt32(43))
+              .build();
         
         assertThat(record.getDirectory()).hasSize(1);
         assertThat(record.getValue(1)).isEqualTo(Value.fromInt32(43));

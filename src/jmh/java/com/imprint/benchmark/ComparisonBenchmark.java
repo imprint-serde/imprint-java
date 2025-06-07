@@ -6,7 +6,7 @@ import com.esotericsoftware.kryo.io.Output;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.flatbuffers.FlatBufferBuilder;
 import com.imprint.core.ImprintRecord;
-import com.imprint.core.ImprintWriter;
+import com.imprint.core.ImprintRecordBuilder;
 import com.imprint.core.SchemaId;
 import com.imprint.types.MapKey;
 import com.imprint.types.Value;
@@ -143,7 +143,7 @@ public class ComparisonBenchmark {
 
     @Benchmark
     public void deserializeSetupFlatBuffers(Blackhole bh) {
-        TestRecordFB result = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
+        com.imprint.benchmark.TestRecordFB result = com.imprint.benchmark.TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
         bh.consume(result);
     }
 
@@ -177,7 +177,7 @@ public class ComparisonBenchmark {
 
     @Benchmark
     public void deserializeProtobuf(Blackhole bh) throws Exception {
-        TestRecordProto.TestRecord result = TestRecordProto.TestRecord.parseFrom(protobufBytes);
+        com.imprint.benchmark.TestRecordProto.TestRecord result = com.imprint.benchmark.TestRecordProto.TestRecord.parseFrom(protobufBytes);
         bh.consume(result);
     }
 
@@ -201,7 +201,7 @@ public class ComparisonBenchmark {
 
     @Benchmark
     public void deserializeFlatBuffers(Blackhole bh) {
-        TestRecordFB result = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
+        com.imprint.benchmark.TestRecordFB result = com.imprint.benchmark.TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
 
         // Access all fields
         result.id();
@@ -259,18 +259,18 @@ public class ComparisonBenchmark {
     @Benchmark
     public void singleFieldAccessAvro(Blackhole bh) throws Exception {
         GenericRecord record = deserializeWithAvro(avroBytes);
-        bh.consume(record.get("extraData4"));
+        bh.consume(record.get("extra_data"));
     }
 
     @Benchmark
     public void singleFieldAccessProtobuf(Blackhole bh) throws Exception {
-        TestRecordProto.TestRecord record = TestRecordProto.TestRecord.parseFrom(protobufBytes);
+        com.imprint.benchmark.TestRecordProto.TestRecord record = com.imprint.benchmark.TestRecordProto.TestRecord.parseFrom(protobufBytes);
         bh.consume(record.getExtraData(4));
     }
 
     @Benchmark
     public void singleFieldAccessFlatBuffers(Blackhole bh) {
-        TestRecordFB record = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
+        com.imprint.benchmark.TestRecordFB record = com.imprint.benchmark.TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
         bh.consume(record.extraData(4));
     }
 
@@ -381,10 +381,10 @@ public class ComparisonBenchmark {
 
     //@Benchmark
     public void mergeProtobuf(Blackhole bh) throws Exception {
-        var record1 = TestRecordProto.TestRecord.parseFrom(protobufBytes);
+        var record1 = com.imprint.benchmark.TestRecordProto.TestRecord.parseFrom(protobufBytes);
         var record2Data = createTestRecord2();
         var record2Bytes = serializeWithProtobuf(record2Data);
-        var record2 = TestRecordProto.TestRecord.parseFrom(record2Bytes);
+        var record2 = com.imprint.benchmark.TestRecordProto.TestRecord.parseFrom(record2Bytes);
 
         var merged = mergeProtobufRecords(record1, record2);
         byte[] result = merged.toByteArray();
@@ -393,10 +393,10 @@ public class ComparisonBenchmark {
 
     //@Benchmark
     public void mergeFlatBuffers(Blackhole bh) {
-        var record1 = TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
+        var record1 = com.imprint.benchmark.TestRecordFB.getRootAsTestRecordFB(flatbuffersBytes.duplicate());
         var record2Data = createTestRecord2();
         var record2Buffer = serializeWithFlatBuffers(record2Data);
-        var record2 = TestRecordFB.getRootAsTestRecordFB(record2Buffer);
+        var record2 = com.imprint.benchmark.TestRecordFB.getRootAsTestRecordFB(record2Buffer);
 
         var merged = mergeFlatBuffersRecords(record1, record2);
         bh.consume(merged);
@@ -521,37 +521,21 @@ public class ComparisonBenchmark {
     }
 
     private ByteBuffer serializeWithImprint(TestRecord data) throws Exception {
-        var writer = new ImprintWriter(new SchemaId(1, 0x12345678));
+        var builder = ImprintRecord.builder(new SchemaId(1, 0x12345678));
+        
+        builder.field(1, data.id);
+        builder.field(2, data.name);
+        builder.field(3, data.price);
+        builder.field(4, data.active);
+        builder.field(5, data.category);
+        builder.field(6, data.tags);
+        builder.field(7, data.metadata);
 
-        writer.addField(1, Value.fromInt32(data.id));
-        writer.addField(2, Value.fromString(data.name));
-        writer.addField(3, Value.fromFloat64(data.price));
-        writer.addField(4, Value.fromBoolean(data.active));
-        writer.addField(5, Value.fromString(data.category));
-
-        var tagValues = new ArrayList<Value>();
-        if (data.tags != null) {
-            for (String tag : data.tags) {
-                tagValues.add(Value.fromString(tag));
-            }
-        }
-        writer.addField(6, Value.fromArray(tagValues));
-
-        var metadataMap = new HashMap<MapKey, Value>();
-        if (data.metadata != null) {
-            for (var entry : data.metadata.entrySet()) {
-                metadataMap.put(MapKey.fromString(entry.getKey()), Value.fromString(entry.getValue()));
-            }
-        }
-        writer.addField(7, Value.fromMap(metadataMap));
-
-        if (data.extraData != null) {
-            for (int i = 0; i < data.extraData.size(); i++) {
-                writer.addField(8 + i, Value.fromString(data.extraData.get(i)));
-            }
+        for (int i = 0; i < data.extraData.size(); i++) {
+            builder.field(8 + i, data.extraData.get(i));
         }
 
-        return writer.build().serializeToBuffer();
+        return builder.build().serializeToBuffer();
     }
 
     private byte[] serializeWithJacksonJson(TestRecord data) throws Exception {
@@ -601,7 +585,7 @@ public class ComparisonBenchmark {
     }
 
     private byte[] serializeWithProtobuf(TestRecord data) {
-        var builder = TestRecordProto.TestRecord.newBuilder()
+        var builder = com.imprint.benchmark.TestRecordProto.TestRecord.newBuilder()
                 .setId(data.id)
                 .setName(data.name)
                 .setPrice(data.price)
@@ -618,20 +602,17 @@ public class ComparisonBenchmark {
     }
 
     private ByteBuffer serializeWithFlatBuffers(TestRecord data) {
-        FlatBufferBuilder builder = new FlatBufferBuilder(1024);
+        var builder = new FlatBufferBuilder(1024);
 
-        // Create strings (must be created before the object that uses them)
         int nameOffset = builder.createString(data.name);
         int categoryOffset = builder.createString(data.category);
 
-        // Create tags array
         int[] tagOffsets = new int[data.tags.size()];
         for (int i = 0; i < data.tags.size(); i++) {
             tagOffsets[i] = builder.createString(data.tags.get(i));
         }
-        int tagsOffset = TestRecordFB.createTagsVector(builder, tagOffsets);
+        int tagsOffset = com.imprint.benchmark.TestRecordFB.createTagsVector(builder, tagOffsets);
 
-        // Create metadata (as parallel arrays for keys and values)
         String[] metadataKeys = data.metadata.keySet().toArray(new String[0]);
         String[] metadataValues = new String[metadataKeys.length];
         int[] keyOffsets = new int[metadataKeys.length];
@@ -642,51 +623,51 @@ public class ComparisonBenchmark {
             keyOffsets[i] = builder.createString(metadataKeys[i]);
             valueOffsets[i] = builder.createString(metadataValues[i]);
         }
-        int metadataKeysOffset = TestRecordFB.createMetadataKeysVector(builder, keyOffsets);
-        int metadataValuesOffset = TestRecordFB.createMetadataValuesVector(builder, valueOffsets);
+        int metadataKeysOffset = com.imprint.benchmark.TestRecordFB.createMetadataKeysVector(builder, keyOffsets);
+        int metadataValuesOffset = com.imprint.benchmark.TestRecordFB.createMetadataValuesVector(builder, valueOffsets);
 
-        // Create extra data array
         int[] extraDataOffsets = new int[data.extraData.size()];
         for (int i = 0; i < data.extraData.size(); i++) {
             extraDataOffsets[i] = builder.createString(data.extraData.get(i));
         }
-        int extraDataOffset = TestRecordFB.createExtraDataVector(builder, extraDataOffsets);
+        int extraDataOffset = com.imprint.benchmark.TestRecordFB.createExtraDataVector(builder, extraDataOffsets);
 
-        // Create the main object
-        TestRecordFB.startTestRecordFB(builder);
-        TestRecordFB.addId(builder, data.id);
-        TestRecordFB.addName(builder, nameOffset);
-        TestRecordFB.addPrice(builder, data.price);
-        TestRecordFB.addActive(builder, data.active);
-        TestRecordFB.addCategory(builder, categoryOffset);
-        TestRecordFB.addTags(builder, tagsOffset);
-        TestRecordFB.addMetadataKeys(builder, metadataKeysOffset);
-        TestRecordFB.addMetadataValues(builder, metadataValuesOffset);
-        TestRecordFB.addExtraData(builder, extraDataOffset);
-        int recordOffset = TestRecordFB.endTestRecordFB(builder);
+        com.imprint.benchmark.TestRecordFB.startTestRecordFB(builder);
+        com.imprint.benchmark.TestRecordFB.addId(builder, data.id);
+        com.imprint.benchmark.TestRecordFB.addName(builder, nameOffset);
+        com.imprint.benchmark.TestRecordFB.addPrice(builder, data.price);
+        com.imprint.benchmark.TestRecordFB.addActive(builder, data.active);
+        com.imprint.benchmark.TestRecordFB.addCategory(builder, categoryOffset);
+        com.imprint.benchmark.TestRecordFB.addTags(builder, tagsOffset);
+        com.imprint.benchmark.TestRecordFB.addMetadataKeys(builder, metadataKeysOffset);
+        com.imprint.benchmark.TestRecordFB.addMetadataValues(builder, metadataValuesOffset);
+        com.imprint.benchmark.TestRecordFB.addExtraData(builder, extraDataOffset);
+        int recordOffset = com.imprint.benchmark.TestRecordFB.endTestRecordFB(builder);
 
-        // Finish and return
         builder.finish(recordOffset);
-        return builder.dataBuffer().slice();
+        return builder.dataBuffer();
     }
 
     private ImprintRecord simulateMerge(ImprintRecord first, ImprintRecord second) throws Exception {
-        var writer = new ImprintWriter(first.getHeader().getSchemaId());
+        var builder = ImprintRecord.builder(first.getHeader().getSchemaId());
         var usedFieldIds = new HashSet<Integer>();
-
-        copyFieldsToWriter(first, writer, usedFieldIds);
-        copyFieldsToWriter(second, writer, usedFieldIds);
-
-        return writer.build();
+        
+        // Copy fields from first record (takes precedence)
+        copyFieldsToBuilder(first, builder, usedFieldIds);
+        
+        // Copy non-conflicting fields from second record
+        copyFieldsToBuilder(second, builder, usedFieldIds);
+        
+        return builder.build();
     }
-
-    private void copyFieldsToWriter(ImprintRecord record, ImprintWriter writer, Set<Integer> usedFieldIds) throws Exception {
+    
+    private void copyFieldsToBuilder(ImprintRecord record, ImprintRecordBuilder builder, Set<Integer> usedFieldIds) throws Exception {
         for (var entry : record.getDirectory()) {
             int fieldId = entry.getId();
             if (!usedFieldIds.contains(fieldId)) {
                 var value = record.getValue(fieldId);
                 if (value != null) {
-                    writer.addField(fieldId, value);
+                    builder.field(fieldId, value);
                     usedFieldIds.add(fieldId);
                 }
             }
@@ -694,7 +675,7 @@ public class ComparisonBenchmark {
     }
 
     private TestRecord mergeTestRecords(TestRecord first, TestRecord second) {
-        var merged = new TestRecord();
+        TestRecord merged = new TestRecord();
         merged.id = first.id;
         merged.name = first.name != null ? first.name : second.name;
         merged.price = first.price != 0.0 ? first.price : second.price;
@@ -729,28 +710,25 @@ public class ComparisonBenchmark {
         return merged;
     }
 
-    private TestRecordProto.TestRecord mergeProtobufRecords(TestRecordProto.TestRecord first, TestRecordProto.TestRecord second) {
-        return TestRecordProto.TestRecord.newBuilder()
+    private com.imprint.benchmark.TestRecordProto.TestRecord mergeProtobufRecords(com.imprint.benchmark.TestRecordProto.TestRecord first, com.imprint.benchmark.TestRecordProto.TestRecord second) {
+        return com.imprint.benchmark.TestRecordProto.TestRecord.newBuilder()
                 .mergeFrom(first)
                 .mergeFrom(second)
                 .build();
     }
 
-    private ByteBuffer mergeFlatBuffersRecords(TestRecordFB first, TestRecordFB second) {
-        FlatBufferBuilder builder = new FlatBufferBuilder(1024);
+    private ByteBuffer mergeFlatBuffersRecords(com.imprint.benchmark.TestRecordFB first, com.imprint.benchmark.TestRecordFB second) {
+        var builder = new FlatBufferBuilder(1024);
 
-        // Use second record's values if they exist, otherwise first record's values
         String name = second.name() != null && !second.name().isEmpty() ? second.name() : first.name();
         String category = second.category() != null && !second.category().isEmpty() ? second.category() : first.category();
         double price = second.price() != 0.0 ? second.price() : first.price();
-        boolean active = second.active(); // Use second's boolean value
-        int id = first.id(); // Keep first record's ID
+        boolean active = second.active();
+        int id = first.id();
 
-        // Create merged strings
         int nameOffset = builder.createString(name);
         int categoryOffset = builder.createString(category);
 
-        // Merge tags (combine both arrays)
         List<String> mergedTags = new ArrayList<>();
         for (int i = 0; i < first.tagsLength(); i++) {
             mergedTags.add(first.tags(i));
@@ -763,9 +741,8 @@ public class ComparisonBenchmark {
         for (int i = 0; i < mergedTags.size(); i++) {
             tagOffsets[i] = builder.createString(mergedTags.get(i));
         }
-        int tagsOffset = TestRecordFB.createTagsVector(builder, tagOffsets);
+        int tagsOffset = com.imprint.benchmark.TestRecordFB.createTagsVector(builder, tagOffsets);
 
-        // Merge metadata (second overwrites first)
         Map<String, String> mergedMetadata = new HashMap<>();
         for (int i = 0; i < first.metadataKeysLength(); i++) {
             mergedMetadata.put(first.metadataKeys(i), first.metadataValues(i));
@@ -782,31 +759,29 @@ public class ComparisonBenchmark {
             keyOffsets[i] = builder.createString(metadataKeys[i]);
             valueOffsets[i] = builder.createString(mergedMetadata.get(metadataKeys[i]));
         }
-        int metadataKeysOffset = TestRecordFB.createMetadataKeysVector(builder, keyOffsets);
-        int metadataValuesOffset = TestRecordFB.createMetadataValuesVector(builder, valueOffsets);
+        int metadataKeysOffset = com.imprint.benchmark.TestRecordFB.createMetadataKeysVector(builder, keyOffsets);
+        int metadataValuesOffset = com.imprint.benchmark.TestRecordFB.createMetadataValuesVector(builder, valueOffsets);
 
-        // Use first record's extra data (or could merge both)
         int[] extraDataOffsets = new int[first.extraDataLength()];
         for (int i = 0; i < first.extraDataLength(); i++) {
             extraDataOffsets[i] = builder.createString(first.extraData(i));
         }
-        int extraDataOffset = TestRecordFB.createExtraDataVector(builder, extraDataOffsets);
+        int extraDataOffset = com.imprint.benchmark.TestRecordFB.createExtraDataVector(builder, extraDataOffsets);
 
-        // Create the merged object
-        TestRecordFB.startTestRecordFB(builder);
-        TestRecordFB.addId(builder, id);
-        TestRecordFB.addName(builder, nameOffset);
-        TestRecordFB.addPrice(builder, price);
-        TestRecordFB.addActive(builder, active);
-        TestRecordFB.addCategory(builder, categoryOffset);
-        TestRecordFB.addTags(builder, tagsOffset);
-        TestRecordFB.addMetadataKeys(builder, metadataKeysOffset);
-        TestRecordFB.addMetadataValues(builder, metadataValuesOffset);
-        TestRecordFB.addExtraData(builder, extraDataOffset);
-        int recordOffset = TestRecordFB.endTestRecordFB(builder);
+        com.imprint.benchmark.TestRecordFB.startTestRecordFB(builder);
+        com.imprint.benchmark.TestRecordFB.addId(builder, id);
+        com.imprint.benchmark.TestRecordFB.addName(builder, nameOffset);
+        com.imprint.benchmark.TestRecordFB.addPrice(builder, price);
+        com.imprint.benchmark.TestRecordFB.addActive(builder, active);
+        com.imprint.benchmark.TestRecordFB.addCategory(builder, categoryOffset);
+        com.imprint.benchmark.TestRecordFB.addTags(builder, tagsOffset);
+        com.imprint.benchmark.TestRecordFB.addMetadataKeys(builder, metadataKeysOffset);
+        com.imprint.benchmark.TestRecordFB.addMetadataValues(builder, metadataValuesOffset);
+        com.imprint.benchmark.TestRecordFB.addExtraData(builder, extraDataOffset);
+        int recordOffset = com.imprint.benchmark.TestRecordFB.endTestRecordFB(builder);
 
         builder.finish(recordOffset);
-        return builder.dataBuffer().slice();
+        return builder.dataBuffer();
     }
 
     private TestRecord createTestRecord() {
