@@ -70,6 +70,28 @@ public final class ImprintRecord {
     }
 
     /**
+     * Project a subset of fields from this record.
+     *
+     * @param fieldIds Array of field IDs to include in the projection
+     * @return New ImprintRecord containing only the requested fields
+     */
+    public ImprintRecord project(int... fieldIds) {
+        return ImprintOperations.project(this, fieldIds);
+    }
+
+    /**
+     * Merge another record into this one.
+     * For duplicate fields, this record's values take precedence.
+     *
+     * @param other The record to merge with this one
+     * @return New ImprintRecord containing merged fields
+     * @throws ImprintException if merge fails
+     */
+    public ImprintRecord merge(ImprintRecord other) throws ImprintException {
+        return ImprintOperations.merge(this, other);
+    }
+
+    /**
      * Get the directory (parsing it if necessary).
      */
     public List<DirectoryEntry> getDirectory() {
