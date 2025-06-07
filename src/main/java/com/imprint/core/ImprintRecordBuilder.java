@@ -143,7 +143,7 @@ public final class ImprintRecordBuilder {
 
     // Build the final record
     public ImprintRecord build() throws ImprintException {
-        var directory = new ArrayList<com.imprint.core.DirectoryEntry>(fields.size());
+        var directoryMap = new TreeMap<Integer, com.imprint.core.DirectoryEntry>();
         var payloadBuffer = ByteBuffer.allocate(estimatePayloadSize());
         payloadBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
@@ -151,7 +151,7 @@ public final class ImprintRecordBuilder {
             int fieldId = entry.getKey();
             var value = entry.getValue();
 
-            directory.add(new com.imprint.core.DirectoryEntry((short)fieldId, value.getTypeCode(), payloadBuffer.position()));
+            directoryMap.put(fieldId, new com.imprint.core.DirectoryEntry((short)fieldId, value.getTypeCode(), payloadBuffer.position()));
             serializeValue(value, payloadBuffer);
         }
 
@@ -160,7 +160,7 @@ public final class ImprintRecordBuilder {
         var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
 
         var header = new com.imprint.core.Header(new com.imprint.core.Flags((byte) 0), schemaId, payloadView.remaining());
-        return new ImprintRecord(header, directory, payloadView);
+        return new ImprintRecord(header, directoryMap, payloadView);
     }
 
     /**
@@ -171,22 +171,22 @@ public final class ImprintRecordBuilder {
      * @throws ImprintException if serialization fails.
      */
     public ByteBuffer buildToBuffer() throws ImprintException {
-        // 1. Prepare payload and directory list
-        var directory = new ArrayList<com.imprint.core.DirectoryEntry>(fields.size());
+        // 1. Prepare payload and directory map
+        var directoryMap = new TreeMap<Integer, com.imprint.core.DirectoryEntry>();
         var payloadBuffer = ByteBuffer.allocate(estimatePayloadSize());
         payloadBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
         for (var entry : fields.entrySet()) {
             int fieldId = entry.getKey();
             var value = entry.getValue();
-            directory.add(new com.imprint.core.DirectoryEntry((short) fieldId, value.getTypeCode(), payloadBuffer.position()));
+            directoryMap.put(fieldId, new com.imprint.core.DirectoryEntry((short) fieldId, value.getTypeCode(), payloadBuffer.position()));
             serializeValue(value, payloadBuffer);
         }
         payloadBuffer.flip();
         var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
 
-        // 2. Serialize directly to the final buffer format
-        return ImprintRecord.serialize(schemaId, directory, payloadView);
+        // 2. Serialize directly to the final buffer format using the map-based method
+        return ImprintRecord.serialize(schemaId, directoryMap, payloadView);
     }
 
     // Internal helper methods

@@ -50,7 +50,18 @@ public final class ImprintBuffers {
         this.parsedDirectory = createDirectoryMap(Objects.requireNonNull(directory));
         this.directoryParsed = true;
         this.payload = payload.asReadOnlyBuffer();
-        this.directoryBuffer = createDirectoryBuffer(directory);
+        this.directoryBuffer = ImprintBuffers.createDirectoryBuffer(directory);
+    }
+
+    /**
+     * Creates buffers from a pre-parsed and sorted directory map (used by ImprintRecordBuilder).
+     * This is an optimized path that avoids creating an intermediate List-to-Map conversion.
+     */
+    public ImprintBuffers(TreeMap<Integer, DirectoryEntry> directoryMap, ByteBuffer payload) {
+        this.parsedDirectory = Objects.requireNonNull(directoryMap);
+        this.directoryParsed = true;
+        this.payload = payload.asReadOnlyBuffer();
+        this.directoryBuffer = ImprintBuffers.createDirectoryBufferFromMap(directoryMap);
     }
 
     /**
@@ -263,7 +274,7 @@ public final class ImprintBuffers {
     /**
      * Create directory buffer from parsed entries.
      */
-    private ByteBuffer createDirectoryBuffer(List<DirectoryEntry> directory) {
+    static ByteBuffer createDirectoryBuffer(List<DirectoryEntry> directory) {
         try {
             int bufferSize = VarInt.encodedLength(directory.size()) + (directory.size() * Constants.DIR_ENTRY_BYTES);
             var buffer = ByteBuffer.allocate(bufferSize);
@@ -281,10 +292,31 @@ public final class ImprintBuffers {
     }
 
     /**
+     * Create directory buffer from a pre-sorted map of entries.
+     */
+    static ByteBuffer createDirectoryBufferFromMap(TreeMap<Integer, DirectoryEntry> directoryMap) {
+        try {
+            int bufferSize = VarInt.encodedLength(directoryMap.size()) + (directoryMap.size() * Constants.DIR_ENTRY_BYTES);
+            var buffer = ByteBuffer.allocate(bufferSize);
+            buffer.order(ByteOrder.LITTLE_ENDIAN);
+
+            VarInt.encode(directoryMap.size(), buffer);
+            // TreeMap.values() returns a collection view, iteration is ordered and efficient.
+            for (var entry : directoryMap.values())
+                serializeDirectoryEntry(entry, buffer);
+
+            buffer.flip();
+            return buffer.asReadOnlyBuffer();
+        } catch (Exception e) {
+            return ByteBuffer.allocate(0).asReadOnlyBuffer();
+        }
+    }
+
+    /**
      * Serialize a single directory entry to the buffer.
      * Format: [fieldId:2bytes][typeCode:1byte][offset:4bytes]
      */
-    private void serializeDirectoryEntry(DirectoryEntry entry, ByteBuffer buffer) {
+    private static void serializeDirectoryEntry(DirectoryEntry entry, ByteBuffer buffer) {
         buffer.putShort(entry.getId());
         buffer.put(entry.getTypeCode().getCode());
         buffer.putInt(entry.getOffset());
