@@ -169,6 +169,7 @@ public abstract class Value {
     }
     
     // Float64 Value
+
     @Getter
     @EqualsAndHashCode(callSuper = false)
     public static class Float64Value extends Value {
@@ -180,7 +181,7 @@ public abstract class Value {
 
         @Override
         public TypeCode getTypeCode() { return TypeCode.FLOAT64; }
-        
+
         @Override
         public String toString() {
             return String.valueOf(value);
@@ -188,17 +189,20 @@ public abstract class Value {
     }
     
     // Bytes Value (array-based)
+    @Getter
     public static class BytesValue extends Value {
+        /**
+         *  Returns internal array. MUST NOT be modified by caller.
+         */
         private final byte[] value;
-        
+
+        /**
+         * Takes ownership of the byte array. Caller must not modify after construction.
+         */
         public BytesValue(byte[] value) {
-            this.value = value.clone();
+            this.value = Objects.requireNonNull(value);
         }
-        
-        public byte[] getValue() { 
-            return value.clone();
-        }
-        
+
         @Override
         public TypeCode getTypeCode() { return TypeCode.BYTES; }
         
