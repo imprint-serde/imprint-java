@@ -117,8 +117,10 @@ public final class ImprintBuffers {
      * Create a new buffer containing the serialized directory.
      */
     public ByteBuffer serializeDirectory() {
-        ensureDirectoryParsed();
-        return createDirectoryBuffer(new ArrayList<>(parsedDirectory.values()));
+        // The directoryBuffer is created on construction and is read-only.
+        // If constructed from raw bytes, it's a view of the original.
+        // If constructed from a list, it's a fresh buffer. In both cases, it's ready.
+        return directoryBuffer.duplicate();
     }
 
     // ========== PRIVATE METHODS ==========

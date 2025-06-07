@@ -156,23 +156,20 @@ public final class ImprintRecord {
      * Serialize this record to a ByteBuffer.
      */
     public ByteBuffer serializeToBuffer() {
-        var buffer = ByteBuffer.allocate(estimateSerializedSize());
-        buffer.order(ByteOrder.LITTLE_ENDIAN);
+        var directoryBuffer = buffers.serializeDirectory(); // This is now optimized to return a duplicate
+        var payloadBuffer = buffers.getPayload();
 
-        // Write header
-        serializeHeader(buffer);
+        int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payloadBuffer.remaining();
+        var finalBuffer = ByteBuffer.allocate(finalSize);
+        finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
-        // Write directory
-        var directoryBuffer = buffers.serializeDirectory();
-        buffer.put(directoryBuffer);
+        // Assemble the final record from existing components
+        serializeHeader(this.header, finalBuffer);
+        finalBuffer.put(directoryBuffer);
+        finalBuffer.put(payloadBuffer.duplicate()); // Use duplicate to preserve original buffer state
 
-        // Write payload
-        var payload = buffers.getPayload();
-        var payloadCopy = payload.duplicate();
-        buffer.put(payloadCopy);
-
-        buffer.flip();
-        return buffer;
+        finalBuffer.flip();
+        return finalBuffer.asReadOnlyBuffer();
     }
 
     public int estimateSerializedSize() {
@@ -180,6 +177,32 @@ public final class ImprintRecord {
         size += buffers.serializeDirectory().remaining(); // directory
         size += buffers.getPayload().remaining(); // payload
         return size;
+    }
+
+    /**
+     * Serializes the components of a record into a single ByteBuffer.
+     * This provides a direct serialization path without needing a live ImprintRecord instance.
+     *
+     * @param schemaId  The schema identifier for the record.
+     * @param directory The list of directory entries, which must be sorted by field ID.
+     * @param payload   The ByteBuffer containing all field data concatenated.
+     * @return A read-only ByteBuffer with the complete serialized record.
+     */
+    public static ByteBuffer serialize(SchemaId schemaId, List<DirectoryEntry> directory, ByteBuffer payload) {
+        var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
+        var directoryBuffer = createDirectoryBuffer(directory);
+
+        int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
+        var finalBuffer = ByteBuffer.allocate(finalSize);
+        finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        // Assemble the final record
+        serializeHeader(header, finalBuffer);
+        finalBuffer.put(directoryBuffer);
+        finalBuffer.put(payload);
+
+        finalBuffer.flip();
+        return finalBuffer.asReadOnlyBuffer();
     }
 
     // ========== STATIC FACTORY METHODS ==========
@@ -272,7 +295,7 @@ public final class ImprintRecord {
         }
     }
 
-    private void serializeHeader(ByteBuffer buffer) {
+    private static void serializeHeader(Header header, ByteBuffer buffer) {
         buffer.put(Constants.MAGIC);
         buffer.put(Constants.VERSION);
         buffer.put(header.getFlags().getValue());
@@ -303,6 +326,30 @@ public final class ImprintRecord {
         int payloadSize = buffer.getInt();
 
         return new Header(flags, new SchemaId(fieldSpaceId, schemaHash), payloadSize);
+    }
+
+    /**
+     * Creates a serialized representation of the directory.
+     */
+    private static ByteBuffer createDirectoryBuffer(List<DirectoryEntry> directory) {
+        try {
+            int bufferSize = VarInt.encodedLength(directory.size()) + (directory.size() * Constants.DIR_ENTRY_BYTES);
+            var buffer = ByteBuffer.allocate(bufferSize);
+            buffer.order(ByteOrder.LITTLE_ENDIAN);
+
+            VarInt.encode(directory.size(), buffer);
+            for (var entry : directory) {
+                buffer.putShort(entry.getId());
+                buffer.put(entry.getTypeCode().getCode());
+                buffer.putInt(entry.getOffset());
+            }
+
+            buffer.flip();
+            return buffer.asReadOnlyBuffer();
+        } catch (Exception e) {
+            // Should not happen with valid inputs
+            return ByteBuffer.allocate(0).asReadOnlyBuffer();
+        }
     }
 
     @Override

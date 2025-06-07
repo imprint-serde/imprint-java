@@ -1,7 +1,6 @@
 package com.imprint.profile;
 
 import com.imprint.core.ImprintRecord;
-import com.imprint.core.ImprintWriter;
 import com.imprint.core.SchemaId;
 import com.imprint.types.Value;
 import org.junit.jupiter.api.Disabled;
@@ -88,15 +87,15 @@ public class ProfilerTest {
         
         // Create and serialize many records (allocation hotspot)
         for (int i = 0; i < 500_000; i++) {
-            var writer = new ImprintWriter(schemaId);
+            var builder = ImprintRecord.builder(schemaId);
             
             // Add various field types
-            writer.addField(1, Value.fromInt32(i))
-                  .addField(2, Value.fromString("test-string-" + i))
-                  .addField(3, Value.fromFloat64(i * 3.14159))
-                  .addField(4, Value.fromBytes(("bytes-" + i).getBytes()));
+            builder.field(1, Value.fromInt32(i))
+                  .field(2, Value.fromString("test-string-" + i))
+                  .field(3, Value.fromFloat64(i * 3.14159))
+                  .field(4, Value.fromBytes(("bytes-" + i).getBytes()));
             
-            var record = writer.build();
+            var record = builder.build();
             var serialized = record.serializeToBuffer(); // Potential hotspot
             
             // Trigger some deserialization
@@ -151,15 +150,15 @@ public class ProfilerTest {
         for (int batch = 0; batch < 1000; batch++) {
             for (int i = 0; i < 1000; i++) {
                 var schemaId = new SchemaId(batch, i);
-                var writer = new ImprintWriter(schemaId);
+                var builder = ImprintRecord.builder(schemaId);
                 
                 // Create strings of varying sizes (allocation pressure)
-                writer.addField(1, Value.fromString("small"))
-                      .addField(2, Value.fromString("medium-length-string-" + i))
-                      .addField(3, Value.fromString("very-long-string-that-will-cause-more-allocation-pressure-" + batch + "-" + i))
-                      .addField(4, Value.fromBytes(new byte[100 + i % 1000])); // Varying byte arrays
+                builder.field(1, Value.fromString("small"))
+                      .field(2, Value.fromString("medium-length-string-" + i))
+                      .field(3, Value.fromString("very-long-string-that-will-cause-more-allocation-pressure-" + batch + "-" + i))
+                      .field(4, Value.fromBytes(new byte[100 + i % 1000])); // Varying byte arrays
                 
-                var record = writer.build();
+                var record = builder.build();
                 
                 // Some deserialization to trigger string decoding allocations
                 record.getValue(2);
@@ -175,54 +174,52 @@ public class ProfilerTest {
     }
     
     private ImprintRecord createTestRecord() throws Exception {
-        var schemaId = new SchemaId(1, 0xdeadbeef);
-        var writer = new ImprintWriter(schemaId);
+        var builder = ImprintRecord.builder(new SchemaId(1, 0xdeadbeef));
         
         for (int i = 1; i <= RECORD_SIZE; i++) {
             switch (i % 4) {
                 case 0:
-                    writer.addField(i, Value.fromInt32(i * 100));
+                    builder.field(i, Value.fromInt32(i * 100));
                     break;
                 case 1:
-                    writer.addField(i, Value.fromString("field-value-" + i));
+                    builder.field(i, Value.fromString("field-value-" + i));
                     break;
                 case 2:
-                    writer.addField(i, Value.fromFloat64(i * 3.14159));
+                    builder.field(i, Value.fromFloat64(i * 3.14159));
                     break;
                 case 3:
-                    writer.addField(i, Value.fromBytes(("bytes-" + i).getBytes()));
+                    builder.field(i, Value.fromBytes(("bytes-" + i).getBytes()));
                     break;
             }
         }
         
-        return writer.build();
+        return builder.build();
     }
     
     private ImprintRecord createLargeRecord() throws Exception {
-        var schemaId = new SchemaId(2, 0xcafebabe);
-        var writer = new ImprintWriter(schemaId);
+        var builder = ImprintRecord.builder(new SchemaId(2, 0xcafebabe));
         
         // Create 100 fields with realistic data
         for (int i = 1; i <= 100; i++) {
             switch (i % 5) {
                 case 0:
-                    writer.addField(i, Value.fromInt32(i));
+                    builder.field(i, Value.fromInt32(i));
                     break;
                 case 1:
-                    writer.addField(i, Value.fromString("user-name-" + i + "@example.com"));
+                    builder.field(i, Value.fromString("user-name-" + i + "@example.com"));
                     break;
                 case 2:
-                    writer.addField(i, Value.fromString("Some longer descriptive text for field " + i + " that might represent a comment or description"));
+                    builder.field(i, Value.fromString("Some longer descriptive text for field " + i + " that might represent a comment or description"));
                     break;
                 case 3:
-                    writer.addField(i, Value.fromFloat64(i * 2.718281828));
+                    builder.field(i, Value.fromFloat64(i * 2.718281828));
                     break;
                 case 4:
-                    writer.addField(i, Value.fromBytes(String.format("binary-data-%04d", i).getBytes()));
+                    builder.field(i, Value.fromBytes(String.format("binary-data-%04d", i).getBytes()));
                     break;
             }
         }
         
-        return writer.build();
+        return builder.build();
     }
 }

@@ -1,10 +1,19 @@
 package com.imprint.core;
 
+import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import com.imprint.types.MapKey;
 import com.imprint.types.Value;
 
-import java.util.*;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * A fluent builder for creating ImprintRecord instances with type-safe, 
@@ -129,16 +138,55 @@ public final class ImprintRecordBuilder {
     }
 
     public Set<Integer> fieldIds() {
-        return new TreeSet<>(fields.keySet());
+        return fields.keySet();
     }
 
     // Build the final record
     public ImprintRecord build() throws ImprintException {
-        var writer = new ImprintWriter(schemaId);
+        var directory = new ArrayList<com.imprint.core.DirectoryEntry>(fields.size());
+        var payloadBuffer = ByteBuffer.allocate(estimatePayloadSize());
+        payloadBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
         for (var entry : fields.entrySet()) {
-            writer.addField(entry.getKey(), entry.getValue());
+            int fieldId = entry.getKey();
+            var value = entry.getValue();
+
+            directory.add(new com.imprint.core.DirectoryEntry((short)fieldId, value.getTypeCode(), payloadBuffer.position()));
+            serializeValue(value, payloadBuffer);
         }
-        return writer.build();
+
+        // Create read-only view of the payload without copying
+        payloadBuffer.flip(); // limit = position, position = 0
+        var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
+
+        var header = new com.imprint.core.Header(new com.imprint.core.Flags((byte) 0), schemaId, payloadView.remaining());
+        return new ImprintRecord(header, directory, payloadView);
+    }
+
+    /**
+     * Builds the record and serializes it directly to a ByteBuffer without creating an intermediate ImprintRecord object.
+     * This is the most efficient path for "write-only" scenarios.
+     *
+     * @return A read-only ByteBuffer containing the fully serialized record.
+     * @throws ImprintException if serialization fails.
+     */
+    public ByteBuffer buildToBuffer() throws ImprintException {
+        // 1. Prepare payload and directory list
+        var directory = new ArrayList<com.imprint.core.DirectoryEntry>(fields.size());
+        var payloadBuffer = ByteBuffer.allocate(estimatePayloadSize());
+        payloadBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        for (var entry : fields.entrySet()) {
+            int fieldId = entry.getKey();
+            var value = entry.getValue();
+            directory.add(new com.imprint.core.DirectoryEntry((short) fieldId, value.getTypeCode(), payloadBuffer.position()));
+            serializeValue(value, payloadBuffer);
+        }
+        payloadBuffer.flip();
+        var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
+
+        // 2. Serialize directly to the final buffer format
+        return ImprintRecord.serialize(schemaId, directory, payloadView);
     }
 
     // Internal helper methods
@@ -237,5 +285,74 @@ public final class ImprintRecordBuilder {
     @Override
     public String toString() {
         return String.format("ImprintRecordBuilder{schemaId=%s, fields=%d}", schemaId, fields.size());
+    }
+
+    private int estimatePayloadSize() throws ImprintException {
+        // More accurate estimation to reduce allocations
+        int estimatedSize = 0;
+        for (var value : fields.values()) {
+            estimatedSize += estimateValueSize(value);
+        }
+        // Add 25% buffer to reduce reallocations
+        return Math.max(estimatedSize + (estimatedSize / 4), fields.size() * 16);
+    }
+    
+    /**
+     * Estimates the serialized size in bytes for a given value.
+     * This method provides size estimates for payload buffer allocation,
+     * supporting both array-based and ByteBuffer-based value types.
+     *
+     * @param value the value to estimate size for
+     * @return estimated size in bytes including type-specific overhead
+     */
+    private int estimateValueSize(Value value) throws ImprintException {
+        // Use TypeHandler for simple types
+        switch (value.getTypeCode()) {
+            case NULL:
+            case BOOL:
+            case INT32:
+            case INT64:
+            case FLOAT32:
+            case FLOAT64:
+            case BYTES:
+            case STRING:
+            case ARRAY:
+            case MAP:
+                return value.getTypeCode().getHandler().estimateSize(value);
+
+            case ROW:
+                Value.RowValue rowValue = (Value.RowValue) value;
+                return rowValue.getValue().estimateSerializedSize();
+
+            default:
+                throw new ImprintException(com.imprint.error.ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + value.getTypeCode());
+        }
+    }
+
+
+    private void serializeValue(Value value, ByteBuffer buffer) throws ImprintException {
+        switch (value.getTypeCode()) {
+            case NULL:
+            case BOOL:
+            case INT32:
+            case INT64:
+            case FLOAT32:
+            case FLOAT64:
+            case BYTES:
+            case STRING:
+            case ARRAY:
+            case MAP:
+                value.getTypeCode().getHandler().serialize(value, buffer);
+                break;
+            //TODO eliminate this switch entirely by implementing a ROW TypeHandler
+            case ROW:
+                Value.RowValue rowValue = (Value.RowValue) value;
+                var serializedRow = rowValue.getValue().serializeToBuffer();
+                buffer.put(serializedRow);
+                break;
+
+            default:
+                throw new ImprintException(com.imprint.error.ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + value.getTypeCode());
+        }
     }
 }

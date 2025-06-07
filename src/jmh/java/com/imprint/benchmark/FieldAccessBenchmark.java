@@ -1,7 +1,7 @@
 package com.imprint.benchmark;
 
 import com.imprint.core.ImprintRecord;
-import com.imprint.core.ImprintWriter;
+import com.imprint.core.ImprintRecordBuilder;
 import com.imprint.core.SchemaId;
 import com.imprint.types.MapKey;
 import com.imprint.types.Value;
@@ -20,8 +20,8 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
-@Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
+@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(1)
 public class FieldAccessBenchmark {
 
@@ -196,83 +196,80 @@ public class FieldAccessBenchmark {
      * This should be replaced with actual project API when available.
      */
     private ImprintRecord simulateProject(ImprintRecord source, int[] fieldIds) throws Exception {
-        var writer = new ImprintWriter(source.getHeader().getSchemaId());
+        var builder = ImprintRecord.builder(source.getHeader().getSchemaId());
         
         for (int fieldId : fieldIds) {
             var value = source.getValue(fieldId);
             if (value != null) {
-                writer.addField(fieldId, value);
+                builder.field(fieldId, value);
             }
         }
         
-        return writer.build();
+        return builder.build();
     }
 
     private ImprintRecord createSparseRecord() throws Exception {
-        var writer = new ImprintWriter(new SchemaId(1, 0x12345678));
-        
-        // Sparse record with large field IDs and few fields
-        writer.addField(1000, Value.fromString("sparse_field_1"));
-        writer.addField(5000, Value.fromInt32(42));
-        writer.addField(10000, Value.fromFloat64(3.14159));
-        writer.addField(15000, Value.fromBoolean(true));
-        writer.addField(20000, Value.fromString("sparse_field_5"));
-        
-        return writer.build();
+        return ImprintRecord.builder(new SchemaId(1, 0x12345678))
+            .field(1000, Value.fromString("sparse_field_1"))
+            .field(5000, Value.fromInt32(42))
+            .field(10000, Value.fromFloat64(3.14159))
+            .field(15000, Value.fromBoolean(true))
+            .field(20000, Value.fromString("sparse_field_5"))
+            .build();
     }
 
     private ImprintRecord createDenseRecord() throws Exception {
-        var writer = new ImprintWriter(new SchemaId(2, 0x87654321));
+        var builder = ImprintRecord.builder(new SchemaId(2, 0x87654321));
         
         // Dense record with 100 sequential fields
         for (int i = 1; i <= 100; i++) {
             switch (i % 5) {
                 case 0:
-                    writer.addField(i, Value.fromString("string_field_" + i));
+                    builder.field(i, Value.fromString("string_field_" + i));
                     break;
                 case 1:
-                    writer.addField(i, Value.fromInt32(i * 10));
+                    builder.field(i, Value.fromInt32(i * 10));
                     break;
                 case 2:
-                    writer.addField(i, Value.fromFloat64(i * 1.5));
+                    builder.field(i, Value.fromFloat64(i * 1.5));
                     break;
                 case 3:
-                    writer.addField(i, Value.fromBoolean(i % 2 == 0));
+                    builder.field(i, Value.fromBoolean(i % 2 == 0));
                     break;
                 case 4:
-                    writer.addField(i, Value.fromInt64(i * 1000L));
+                    builder.field(i, Value.fromInt64(i * 1000L));
                     break;
             }
         }
         
-        return writer.build();
+        return builder.build();
     }
 
     private ImprintRecord createLargeRecord() throws Exception {
-        var writer = new ImprintWriter(new SchemaId(3, 0x11223344));
+        var builder = ImprintRecord.builder(new SchemaId(3, 0xABCDEF12));
         
-        // Large record with complex data types
-        writer.addField(1, Value.fromString("LargeRecord"));
+        // Large record with complex fields (arrays, maps)
+        builder.field(1, Value.fromString("Large record with complex data"));
         
-        // Large array field
-        var largeArray = new ArrayList<Value>();
-        for (int i = 0; i < 1000; i++) {
-            largeArray.add(Value.fromString("array_item_" + i));
+        // Add a large array
+        var list = new ArrayList<Value>();
+        for (int i = 0; i < 200; i++) {
+            list.add(Value.fromInt32(i));
         }
-        writer.addField(2, Value.fromArray(largeArray));
+        builder.field(2, Value.fromArray(list));
         
-        // Large map field
-        var largeMap = new HashMap<MapKey, Value>();
+        // Add a large map
+        var map = new HashMap<MapKey, Value>();
         for (int i = 0; i < 100; i++) {
-            largeMap.put(MapKey.fromString("key_" + i), Value.fromString("map_value_" + i));
+            map.put(MapKey.fromString("key_" + i), Value.fromString("value_" + i));
         }
-        writer.addField(3, Value.fromMap(largeMap));
+        builder.field(3, Value.fromMap(map));
         
-        // Many regular fields
+        // Add more fields
         for (int i = 4; i <= 50; i++) {
-            writer.addField(i, Value.fromString("large_record_field_" + i + "_with_substantial_content"));
+            builder.field(i, Value.fromBytes(new byte[1024])); // 1KB byte arrays
         }
         
-        return writer.build();
+        return builder.build();
     }
 }

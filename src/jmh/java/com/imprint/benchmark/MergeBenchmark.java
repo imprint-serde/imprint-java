@@ -1,7 +1,7 @@
 package com.imprint.benchmark;
 
 import com.imprint.core.ImprintRecord;
-import com.imprint.core.ImprintWriter;
+import com.imprint.core.ImprintRecordBuilder;
 import com.imprint.core.SchemaId;
 import com.imprint.types.Value;
 import org.openjdk.jmh.annotations.*;
@@ -83,25 +83,25 @@ public class MergeBenchmark {
      * This should be replaced with actual merge API when available.
      */
     private ImprintRecord simulateMerge(ImprintRecord first, ImprintRecord second) throws Exception {
-        var writer = new ImprintWriter(first.getHeader().getSchemaId());
+        var builder = ImprintRecord.builder(first.getHeader().getSchemaId());
         var usedFieldIds = new HashSet<Integer>();
         
         // Copy fields from first record (takes precedence)
-        copyFieldsToWriter(first, writer, usedFieldIds);
+        copyFieldsToBuilder(first, builder, usedFieldIds);
         
         // Copy non-conflicting fields from second record
-        copyFieldsToWriter(second, writer, usedFieldIds);
+        copyFieldsToBuilder(second, builder, usedFieldIds);
         
-        return writer.build();
+        return builder.build();
     }
 
-    private void copyFieldsToWriter(ImprintRecord record, ImprintWriter writer, Set<Integer> usedFieldIds) throws Exception {
+    private void copyFieldsToBuilder(ImprintRecord record, ImprintRecordBuilder builder, Set<Integer> usedFieldIds) throws Exception {
         for (var entry : record.getDirectory()) {
             int fieldId = entry.getId();
             if (!usedFieldIds.contains(fieldId)) {
                 var value = record.getValue(fieldId);
                 if (value != null) {
-                    writer.addField(fieldId, value);
+                    builder.field(fieldId, value);
                     usedFieldIds.add(fieldId);
                 }
             }
@@ -109,55 +109,49 @@ public class MergeBenchmark {
     }
 
     private ImprintRecord createProductRecord() throws Exception {
-        var writer = new ImprintWriter(new SchemaId(1, 0x12345678));
-        
-        writer.addField(1, Value.fromString("Product"));
-        writer.addField(2, Value.fromInt32(12345));
-        writer.addField(3, Value.fromString("Laptop"));
-        writer.addField(4, Value.fromFloat64(999.99));
-        writer.addField(5, Value.fromString("Electronics"));
-        writer.addField(6, Value.fromInt32(50)); // stock
-        writer.addField(7, Value.fromString("TechCorp"));
-        writer.addField(8, Value.fromBoolean(true)); // available
-        
-        return writer.build();
+        return ImprintRecord.builder(new SchemaId(1, 0x12345678))
+            .field(1, Value.fromString("Product"))
+            .field(2, Value.fromInt32(12345))
+            .field(3, Value.fromString("Laptop"))
+            .field(4, Value.fromFloat64(999.99))
+            .field(5, Value.fromString("Electronics"))
+            .field(6, Value.fromInt32(50)) // stock
+            .field(7, Value.fromString("TechCorp"))
+            .field(8, Value.fromBoolean(true)) // available
+            .build();
     }
 
     private ImprintRecord createOrderRecord() throws Exception {
-        var writer = new ImprintWriter(new SchemaId(2, 0x87654321));
-        
-        writer.addField(10, Value.fromString("Order"));
-        writer.addField(11, Value.fromInt32(67890));
-        writer.addField(12, Value.fromInt32(12345)); // product_id (overlaps with product)
-        writer.addField(13, Value.fromInt32(2)); // quantity
-        writer.addField(14, Value.fromFloat64(1999.98)); // total
-        writer.addField(15, Value.fromString("2024-01-15")); // order_date
-        writer.addField(16, Value.fromString("shipped")); // status
-        
-        return writer.build();
+        return ImprintRecord.builder(new SchemaId(2, 0x87654321))
+            .field(10, Value.fromString("Order"))
+            .field(11, Value.fromInt32(67890))
+            .field(12, Value.fromInt32(12345)) // product_id (overlaps with product)
+            .field(13, Value.fromInt32(2)) // quantity
+            .field(14, Value.fromFloat64(1999.98)) // total
+            .field(15, Value.fromString("2024-01-15")) // order_date
+            .field(16, Value.fromString("shipped")) // status
+            .build();
     }
 
     private ImprintRecord createCustomerRecord() throws Exception {
-        var writer = new ImprintWriter(new SchemaId(3, 0x11223344));
-        
-        writer.addField(20, Value.fromString("Customer"));
-        writer.addField(21, Value.fromInt32(555));
-        writer.addField(22, Value.fromString("John Doe"));
-        writer.addField(23, Value.fromString("john.doe@email.com"));
-        writer.addField(24, Value.fromString("123 Main St"));
-        writer.addField(25, Value.fromString("premium")); // tier
-        writer.addField(26, Value.fromBoolean(true)); // active
-        
-        return writer.build();
+        return ImprintRecord.builder(new SchemaId(3, 0x11223344))
+            .field(20, Value.fromString("Customer"))
+            .field(21, Value.fromInt32(555))
+            .field(22, Value.fromString("John Doe"))
+            .field(23, Value.fromString("john.doe@email.com"))
+            .field(24, Value.fromString("123 Main St"))
+            .field(25, Value.fromString("premium")) // tier
+            .field(26, Value.fromBoolean(true)) // active
+            .build();
     }
 
     private ImprintRecord createRecordWithFields(int startId, int endId, String prefix) throws Exception {
-        var writer = new ImprintWriter(new SchemaId(1, 0x12345678));
+        var builder = ImprintRecord.builder(new SchemaId(1, 0x12345678));
         
         for (int i = startId; i <= endId; i++) {
-            writer.addField(i, Value.fromString(prefix + "field_" + i));
+            builder.field(i, Value.fromString(prefix + "field_" + i));
         }
         
-        return writer.build();
+        return builder.build();
     }
 }
