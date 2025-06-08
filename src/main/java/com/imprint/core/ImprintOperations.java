@@ -53,7 +53,7 @@ public class ImprintOperations {
                         record.getBuffers().getPayload().limit();
                 int fieldLength = nextOffset - field.getOffset();
 
-                newDirectory.add(new DirectoryEntry(field.getId(), field.getTypeCode(), currentOffset));
+                newDirectory.add(new SimpleDirectoryEntry(field.getId(), field.getTypeCode(), currentOffset));
                 ranges.add(new FieldRange(field.getOffset(), nextOffset));
 
                 currentOffset += fieldLength;
@@ -133,7 +133,7 @@ public class ImprintOperations {
                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Failed to get raw bytes for field " + currentEntry.getId());
 
             // Add adjusted directory entry
-            var newEntry = new DirectoryEntry(currentEntry.getId(), currentEntry.getTypeCode(), currentOffset);
+            var newEntry = new SimpleDirectoryEntry(currentEntry.getId(), currentEntry.getTypeCode(), currentOffset);
             newDirectory.add(newEntry);
 
             // Collect payload chunk
