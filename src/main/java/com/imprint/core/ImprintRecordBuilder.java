@@ -3,6 +3,7 @@ package com.imprint.core;
 import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import com.imprint.types.MapKey;
+import com.imprint.types.TypeCode;
 import com.imprint.types.Value;
 import lombok.SneakyThrows;
 
@@ -40,7 +41,7 @@ import java.util.TreeMap;
 @SuppressWarnings("unused")
 public final class ImprintRecordBuilder {
     private final SchemaId schemaId;
-    private final Map<Integer, Value> fields = new TreeMap<>();
+    private final Map<Integer, BuilderEntry> fields = new TreeMap<>();
     private int estimatedPayloadSize = 0;
 
     ImprintRecordBuilder(SchemaId schemaId) {
@@ -145,16 +146,12 @@ public final class ImprintRecordBuilder {
 
     // Build the final record
     public ImprintRecord build() throws ImprintException {
-        var directoryMap = new TreeMap<Integer, com.imprint.core.DirectoryEntry>();
         var payloadBuffer = ByteBuffer.allocate(estimatePayloadSize());
         payloadBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
-        for (var entry : fields.entrySet()) {
-            int fieldId = entry.getKey();
-            var value = entry.getValue();
-
-            directoryMap.put(fieldId, new com.imprint.core.DirectoryEntry((short)fieldId, value.getTypeCode(), payloadBuffer.position()));
-            serializeValue(value, payloadBuffer);
+        for (var entry : fields.values()) {
+            entry.setOffset(payloadBuffer.position());
+            serializeValue(entry.getValue(), payloadBuffer);
         }
 
         // Create read-only view of the payload without copying
@@ -162,7 +159,7 @@ public final class ImprintRecordBuilder {
         var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
 
         var header = new com.imprint.core.Header(new com.imprint.core.Flags((byte) 0), schemaId, payloadView.remaining());
-        return new ImprintRecord(header, directoryMap, payloadView);
+        return new ImprintRecord(header, new ArrayList<>(fields.values()), payloadView);
     }
 
     /**
@@ -173,22 +170,19 @@ public final class ImprintRecordBuilder {
      * @throws ImprintException if serialization fails.
      */
     public ByteBuffer buildToBuffer() throws ImprintException {
-        // 1. Prepare payload and directory map
-        var directoryMap = new TreeMap<Integer, com.imprint.core.DirectoryEntry>();
+        // 1. Prepare payload and directory
         var payloadBuffer = ByteBuffer.allocate(estimatePayloadSize());
         payloadBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
-        for (var entry : fields.entrySet()) {
-            int fieldId = entry.getKey();
-            var value = entry.getValue();
-            directoryMap.put(fieldId, new com.imprint.core.DirectoryEntry((short) fieldId, value.getTypeCode(), payloadBuffer.position()));
-            serializeValue(value, payloadBuffer);
+        for (var entry : fields.values()) {
+            entry.setOffset(payloadBuffer.position());
+            serializeValue(entry.getValue(), payloadBuffer);
         }
         payloadBuffer.flip();
         var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
 
         // 2. Serialize directly to the final buffer format using the map-based method
-        return ImprintRecord.serialize(schemaId, directoryMap, payloadView);
+        return ImprintRecord.serialize(schemaId, new ArrayList<>(fields.values()), payloadView);
     }
 
     // Internal helper methods
@@ -202,14 +196,15 @@ public final class ImprintRecordBuilder {
      */
     private ImprintRecordBuilder addField(int id, Value value) {
         Objects.requireNonNull(value, "Value cannot be null - use nullField() for explicit null values");
+        var newEntry = new BuilderEntry((short) id, value);
 
         // Subtract the size of the old value if it's being replaced.
-        var oldValue = fields.get(id);
-        if (oldValue != null)
-            estimatedPayloadSize -= estimateValueSize(oldValue);
+        var oldEntry = fields.get(id);
+        if (oldEntry != null)
+            estimatedPayloadSize -= estimateValueSize(oldEntry.getValue());
 
-        fields.put(id, value);
-        estimatedPayloadSize += estimateValueSize(value);
+        fields.put(id, newEntry);
+        estimatedPayloadSize += estimateValueSize(newEntry.getValue());
         return this;
     }
 
@@ -269,8 +264,7 @@ public final class ImprintRecordBuilder {
             return Value.fromRow((ImprintRecord) obj);
         }
 
-        throw new IllegalArgumentException("Cannot convert " + obj.getClass().getSimpleName() +
-                " to Imprint Value. Supported types: boolean, int, long, float, double, String, byte[], List, Map, ImprintRecord");
+        throw new IllegalArgumentException("Unsupported type for auto-conversion: " + obj.getClass().getName());
     }
 
     private MapKey convertToMapKey(Object obj) {
@@ -287,13 +281,15 @@ public final class ImprintRecordBuilder {
             return MapKey.fromBytes((byte[]) obj);
         }
 
-        throw new IllegalArgumentException("Invalid map key type: " + obj.getClass().getSimpleName() +
-                ". Map keys must be int, long, String, or byte[]");
+        throw new IllegalArgumentException("Unsupported map key type: " + obj.getClass().getName());
     }
 
     @Override
     public String toString() {
-        return String.format("ImprintRecordBuilder{schemaId=%s, fields=%d}", schemaId, fields.size());
+        return "ImprintRecordBuilder{" +
+                "schemaId=" + schemaId +
+                ", fields=" + fields +
+                '}';
     }
 
     private int estimatePayloadSize() {
@@ -334,8 +330,8 @@ public final class ImprintRecordBuilder {
         }
     }
 
-
     private void serializeValue(Value value, ByteBuffer buffer) throws ImprintException {
+        // Use TypeHandler for simple types
         switch (value.getTypeCode()) {
             case NULL:
             case BOOL:
@@ -358,6 +354,51 @@ public final class ImprintRecordBuilder {
 
             default:
                 throw new ImprintException(com.imprint.error.ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + value.getTypeCode());
+        }
+    }
+
+    // Private inner class to hold field data during building
+    private static class BuilderEntry implements DirectoryEntry {
+        private final short id;
+        private final Value value;
+        private int offset;
+
+        BuilderEntry(short id, Value value) {
+            this.id = id;
+            this.value = value;
+            this.offset = -1; // Initially unknown
+        }
+
+        @Override
+        public short getId() {
+            return id;
+        }
+
+        @Override
+        public TypeCode getTypeCode() {
+            return value.getTypeCode();
+        }
+
+        @Override
+        public int getOffset() {
+            return offset;
+        }
+
+        public void setOffset(int offset) {
+            this.offset = offset;
+        }
+
+        public Value getValue() {
+            return value;
+        }
+
+        @Override
+        public String toString() {
+            return "BuilderEntry{" +
+                    "id=" + id +
+                    ", value=" + value +
+                    ", offset=" + offset +
+                    '}';
         }
     }
 }

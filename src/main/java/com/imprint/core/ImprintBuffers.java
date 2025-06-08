@@ -10,6 +10,7 @@ import lombok.Getter;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.TreeMap;
@@ -44,24 +45,24 @@ public final class ImprintBuffers {
     }
 
     /**
-     * Creates buffers from pre-parsed directory (used during construction).
+     * Creates buffers from a pre-parsed directory (used during construction).
+     * This constructor is used by the ImprintRecordBuilder path. It creates
+     * a serialized directory buffer but defers parsing it into a map until it's actually needed.
      */
-    public ImprintBuffers(List<DirectoryEntry> directory, ByteBuffer payload) {
-        this.parsedDirectory = createDirectoryMap(Objects.requireNonNull(directory));
-        this.directoryParsed = true;
+    public ImprintBuffers(Collection<? extends DirectoryEntry> directory, ByteBuffer payload) {
+        this.directoryBuffer = ImprintBuffers.createDirectoryBuffer(Objects.requireNonNull(directory));
         this.payload = payload.asReadOnlyBuffer();
-        this.directoryBuffer = ImprintBuffers.createDirectoryBuffer(directory);
     }
 
     /**
      * Creates buffers from a pre-parsed and sorted directory map (used by ImprintRecordBuilder).
      * This is an optimized path that avoids creating an intermediate List-to-Map conversion.
+     * This constructor is used by the ImprintRecordBuilder path. It creates
+     * a serialized directory buffer but defers parsing it into a map until it's actually needed.
      */
-    public ImprintBuffers(TreeMap<Integer, DirectoryEntry> directoryMap, ByteBuffer payload) {
-        this.parsedDirectory = Objects.requireNonNull(directoryMap);
-        this.directoryParsed = true;
+    public ImprintBuffers(TreeMap<Integer, ? extends DirectoryEntry> directoryMap, ByteBuffer payload) {
+        this.directoryBuffer = ImprintBuffers.createDirectoryBufferFromMap(Objects.requireNonNull(directoryMap));
         this.payload = payload.asReadOnlyBuffer();
-        this.directoryBuffer = ImprintBuffers.createDirectoryBufferFromMap(directoryMap);
     }
 
     /**
@@ -261,20 +262,9 @@ public final class ImprintBuffers {
     }
 
     /**
-     * Create a TreeMap from directory list field lookup with ordering.
-     */
-    private TreeMap<Integer, DirectoryEntry> createDirectoryMap(List<DirectoryEntry> directory) {
-        var map = new TreeMap<Integer, DirectoryEntry>();
-        for (var entry : directory) {
-            map.put((int)entry.getId(), entry);
-        }
-        return map;
-    }
-
-    /**
      * Create directory buffer from parsed entries.
      */
-    static ByteBuffer createDirectoryBuffer(List<DirectoryEntry> directory) {
+    static ByteBuffer createDirectoryBuffer(Collection<? extends DirectoryEntry> directory) {
         try {
             int bufferSize = VarInt.encodedLength(directory.size()) + (directory.size() * Constants.DIR_ENTRY_BYTES);
             var buffer = ByteBuffer.allocate(bufferSize);
@@ -294,14 +284,13 @@ public final class ImprintBuffers {
     /**
      * Create directory buffer from a pre-sorted map of entries.
      */
-    static ByteBuffer createDirectoryBufferFromMap(TreeMap<Integer, DirectoryEntry> directoryMap) {
+    static ByteBuffer createDirectoryBufferFromMap(TreeMap<Integer, ? extends DirectoryEntry> directoryMap) {
         try {
             int bufferSize = VarInt.encodedLength(directoryMap.size()) + (directoryMap.size() * Constants.DIR_ENTRY_BYTES);
             var buffer = ByteBuffer.allocate(bufferSize);
             buffer.order(ByteOrder.LITTLE_ENDIAN);
 
             VarInt.encode(directoryMap.size(), buffer);
-            // TreeMap.values() returns a collection view, iteration is ordered and efficient.
             for (var entry : directoryMap.values())
                 serializeDirectoryEntry(entry, buffer);
 
@@ -334,6 +323,6 @@ public final class ImprintBuffers {
         var typeCode = TypeCode.fromByte(buffer.get());
         int offset = buffer.getInt();
 
-        return new DirectoryEntry(id, typeCode, offset);
+        return new SimpleDirectoryEntry(id, typeCode, offset);
     }
 }

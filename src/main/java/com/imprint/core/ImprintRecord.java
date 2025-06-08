@@ -11,6 +11,7 @@ import lombok.Getter;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -36,7 +37,7 @@ public final class ImprintRecord {
     /**
      * Creates a record from pre-parsed directory (used by ImprintWriter).
      */
-    ImprintRecord(Header header, List<DirectoryEntry> directory, ByteBuffer payload) {
+    ImprintRecord(Header header, Collection<? extends DirectoryEntry> directory, ByteBuffer payload) {
         this.header = Objects.requireNonNull(header, "Header cannot be null");
         this.buffers = new ImprintBuffers(directory, payload);
     }
@@ -44,7 +45,7 @@ public final class ImprintRecord {
     /**
      * Creates a record from a pre-parsed and sorted directory map (used by ImprintRecordBuilder).
      */
-    ImprintRecord(Header header, TreeMap<Integer, DirectoryEntry> directoryMap, ByteBuffer payload) {
+    ImprintRecord(Header header, TreeMap<Integer, ? extends DirectoryEntry> directoryMap, ByteBuffer payload) {
         this.header = Objects.requireNonNull(header, "Header cannot be null");
         this.buffers = new ImprintBuffers(directoryMap, payload);
     }
@@ -197,7 +198,7 @@ public final class ImprintRecord {
      * @param payload   The ByteBuffer containing all field data concatenated.
      * @return A read-only ByteBuffer with the complete serialized record.
      */
-    public static ByteBuffer serialize(SchemaId schemaId, List<DirectoryEntry> directory, ByteBuffer payload) {
+    public static ByteBuffer serialize(SchemaId schemaId, Collection<? extends DirectoryEntry> directory, ByteBuffer payload) {
         var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
         var directoryBuffer = ImprintBuffers.createDirectoryBuffer(directory);
 
@@ -223,7 +224,7 @@ public final class ImprintRecord {
      * @param payload      The ByteBuffer containing all field data concatenated.
      * @return A read-only ByteBuffer with the complete serialized record.
      */
-    public static ByteBuffer serialize(SchemaId schemaId, TreeMap<Integer, DirectoryEntry> directoryMap, ByteBuffer payload) {
+    public static ByteBuffer serialize(SchemaId schemaId, TreeMap<Integer, ? extends DirectoryEntry> directoryMap, ByteBuffer payload) {
         var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
         var directoryBuffer = ImprintBuffers.createDirectoryBufferFromMap(directoryMap);
 

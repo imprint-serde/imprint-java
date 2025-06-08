@@ -1,23 +1,24 @@
 package com.imprint.core;
 
 import com.imprint.types.TypeCode;
-import lombok.Value;
-
-import java.util.Objects;
 
 /**
- * A directory entry describing a single field in an Imprint record.
- * Each entry has a fixed size of 7 bytes.
+ * Represents the common interface for a directory entry in an Imprint record.
+ * A directory entry provides metadata about a field, such as its ID, type, and location in the payload.
  */
-@Value
-public class DirectoryEntry {
-    short id;
-    TypeCode typeCode;
-    int offset;
-    
-    public DirectoryEntry(int id, TypeCode typeCode, int offset) {
-        this.id = (short) id;
-        this.typeCode = Objects.requireNonNull(typeCode, "TypeCode cannot be null");
-        this.offset = offset;
-    }
+public interface DirectoryEntry {
+    /**
+     * @return The field's unique identifier.
+     */
+    short getId();
+
+    /**
+     * @return The {@link TypeCode} of the field's value.
+     */
+    TypeCode getTypeCode();
+
+    /**
+     * @return The starting position (offset) of the field's data within the payload buffer.
+     */
+    int getOffset();
 }
