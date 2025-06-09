@@ -70,13 +70,10 @@ public final class VarInt {
         int bytesRead = 0;
 
         while (true) {
-            if (bytesRead >= MAX_VARINT_LEN) {
+            if (bytesRead >= MAX_VARINT_LEN)
                 throw new ImprintException(ErrorType.MALFORMED_VARINT, "VarInt too long");
-            }
-            if (!buffer.hasRemaining()) {
-                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
-                        "Unexpected end of data while reading VarInt");
-            }
+            if (!buffer.hasRemaining())
+                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Unexpected end of data while reading VarInt");
 
             byte b = buffer.get();
             bytesRead++;

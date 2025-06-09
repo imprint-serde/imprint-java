@@ -1,15 +1,7 @@
 package com.imprint.benchmark;
 
-import com.imprint.benchmark.competitors.AbstractCompetitor;
-import com.imprint.benchmark.competitors.AvroCompetitor;
+import com.imprint.benchmark.competitors.*;
 import com.imprint.benchmark.competitors.Competitor;
-import com.imprint.benchmark.competitors.FlatBuffersCompetitor;
-import com.imprint.benchmark.competitors.ImprintCompetitor;
-import com.imprint.benchmark.competitors.JacksonJsonCompetitor;
-import com.imprint.benchmark.competitors.KryoCompetitor;
-import com.imprint.benchmark.competitors.MessagePackCompetitor;
-import com.imprint.benchmark.competitors.ProtobufCompetitor;
-import com.imprint.benchmark.competitors.ThriftCompetitor;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 import org.openjdk.jmh.runner.Runner;
@@ -20,13 +12,12 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
-@BenchmarkMode(Mode.Throughput)
-@OutputTimeUnit(TimeUnit.SECONDS)
-@Warmup(iterations = 3, time = 5)
-@Measurement(iterations = 5, time = 10)
+@Warmup(iterations = 3, time = 1)
+@Measurement(iterations = 10, time = 1)
 @Fork(value = 1, jvmArgs = {"-Xms4g", "-Xmx4g"})
 public class ComparisonBenchmark {
 
@@ -45,8 +36,6 @@ public class ComparisonBenchmark {
     public String competitorName;
 
     private Competitor competitor;
-    private DataGenerator.TestRecord testRecord1;
-    private DataGenerator.TestRecord testRecord2;
 
     @Setup(Level.Trial)
     public void setup() {
@@ -57,8 +46,8 @@ public class ComparisonBenchmark {
                 .orElseThrow(() -> new IllegalStateException("Unknown competitor: " + competitorName));
 
         // Create the test data
-        testRecord1 = DataGenerator.createTestRecord();
-        testRecord2 = DataGenerator.createTestRecord();
+        DataGenerator.TestRecord testRecord1 = DataGenerator.createTestRecord();
+        DataGenerator.TestRecord testRecord2 = DataGenerator.createTestRecord();
 
         // Setup the competitor with the data
         competitor.setup(testRecord1, testRecord2);

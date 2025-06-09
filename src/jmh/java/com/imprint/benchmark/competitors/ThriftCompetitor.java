@@ -17,7 +17,6 @@ public class ThriftCompetitor extends AbstractCompetitor {
 
     private final TSerializer serializer;
     private final TDeserializer deserializer;
-    private final TestRecord thriftRecord;
     private byte[] serializedRecord1;
     private byte[] serializedRecord2;
 
@@ -26,7 +25,6 @@ public class ThriftCompetitor extends AbstractCompetitor {
         try {
             this.serializer = new TSerializer(new TBinaryProtocol.Factory());
             this.deserializer = new TDeserializer(new TBinaryProtocol.Factory());
-            this.thriftRecord = new TestRecord();
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize Thrift competitor", e);
         }

@@ -11,7 +11,6 @@ import org.openjdk.jmh.infra.Blackhole;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
-import java.util.stream.Collectors;
 
 public class AvroCompetitor extends AbstractCompetitor {
 

@@ -3,8 +3,10 @@ package com.imprint.benchmark.competitors;
 import com.imprint.benchmark.DataGenerator;
 import com.imprint.core.ImprintOperations;
 import com.imprint.core.ImprintRecord;
+import com.imprint.core.ImprintRecordBuilder;
 import com.imprint.core.SchemaId;
 import com.imprint.error.ImprintException;
+import lombok.SneakyThrows;
 import org.openjdk.jmh.infra.Blackhole;
 
 import java.nio.ByteBuffer;
@@ -12,7 +14,6 @@ import java.nio.ByteBuffer;
 public class ImprintCompetitor extends AbstractCompetitor {
 
     private ImprintRecord imprintRecord1;
-    private ImprintRecord imprintRecord2;
     private byte[] serializedRecord1;
     private byte[] serializedRecord2;
     private static final SchemaId SCHEMA_ID = new SchemaId(1, 1);
@@ -26,13 +27,13 @@ public class ImprintCompetitor extends AbstractCompetitor {
         super.setup(testRecord, testRecord2);
         try {
             this.imprintRecord1 = buildRecord(testRecord);
-            this.imprintRecord2 = buildRecord(testRecord2);
+            ImprintRecord imprintRecord2 = buildRecord(testRecord2);
             
             ByteBuffer buf1 = this.imprintRecord1.serializeToBuffer();
             this.serializedRecord1 = new byte[buf1.remaining()];
             buf1.get(this.serializedRecord1);
 
-            ByteBuffer buf2 = this.imprintRecord2.serializeToBuffer();
+            ByteBuffer buf2 = imprintRecord2.serializeToBuffer();
             this.serializedRecord2 = new byte[buf2.remaining()];
             buf2.get(this.serializedRecord2);
         } catch (ImprintException e) {
@@ -53,9 +54,26 @@ public class ImprintCompetitor extends AbstractCompetitor {
         return builder.build();
     }
 
+    private ImprintRecordBuilder preBuildRecord(DataGenerator.TestRecord pojo) throws ImprintException {
+        var builder = ImprintRecord.builder(SCHEMA_ID);
+        builder.field(0, pojo.id);
+        builder.field(1, pojo.timestamp);
+        builder.field(2, pojo.flags);
+        builder.field(3, pojo.active);
+        builder.field(4, pojo.value);
+        builder.field(5, pojo.data);
+        builder.field(6, pojo.tags);
+        builder.field(7, pojo.metadata);
+        return builder;
+    }
+
     @Override
     public void serialize(Blackhole bh) {
-        bh.consume(this.imprintRecord1.serializeToBuffer());
+        try {
+            bh.consume(buildRecord(DataGenerator.createTestRecord()).serializeToBuffer());
+        } catch (ImprintException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

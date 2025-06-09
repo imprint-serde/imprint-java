@@ -1,21 +1,18 @@
 package com.imprint.core;
 
-import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import com.imprint.types.MapKey;
 import com.imprint.types.TypeCode;
 import com.imprint.types.Value;
+import it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMap;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.SneakyThrows;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.TreeMap;
+import java.util.*;
 
 /**
  * A fluent builder for creating ImprintRecord instances with type-safe, 
@@ -41,7 +38,7 @@ import java.util.TreeMap;
 @SuppressWarnings("unused")
 public final class ImprintRecordBuilder {
     private final SchemaId schemaId;
-    private final Map<Integer, BuilderEntry> fields = new TreeMap<>();
+    private final Int2ObjectSortedMap<BuilderEntry> fields = new Int2ObjectAVLTreeMap<>();
     private int estimatedPayloadSize = 0;
 
     ImprintRecordBuilder(SchemaId schemaId) {
@@ -158,8 +155,8 @@ public final class ImprintRecordBuilder {
         payloadBuffer.flip(); // limit = position, position = 0
         var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
 
-        var header = new com.imprint.core.Header(new com.imprint.core.Flags((byte) 0), schemaId, payloadView.remaining());
-        return new ImprintRecord(header, new ArrayList<>(fields.values()), payloadView);
+        var header = new Header(new Flags((byte) 0), schemaId, payloadView.remaining());
+        return new ImprintRecord(header, fields, payloadView);
     }
 
     /**
@@ -284,14 +281,6 @@ public final class ImprintRecordBuilder {
         throw new IllegalArgumentException("Unsupported map key type: " + obj.getClass().getName());
     }
 
-    @Override
-    public String toString() {
-        return "ImprintRecordBuilder{" +
-                "schemaId=" + schemaId +
-                ", fields=" + fields +
-                '}';
-    }
-
     private int estimatePayloadSize() {
         // Add 25% buffer to reduce reallocations and handle VarInt encoding fluctuations.
         return Math.max(estimatedPayloadSize + (estimatedPayloadSize / 4), fields.size() * 16);
@@ -357,48 +346,23 @@ public final class ImprintRecordBuilder {
         }
     }
 
-    // Private inner class to hold field data during building
+
+    @Getter
     private static class BuilderEntry implements DirectoryEntry {
         private final short id;
         private final Value value;
+        @Setter
         private int offset;
 
         BuilderEntry(short id, Value value) {
             this.id = id;
             this.value = value;
-            this.offset = -1; // Initially unknown
-        }
-
-        @Override
-        public short getId() {
-            return id;
+            this.offset = -1;
         }
 
         @Override
         public TypeCode getTypeCode() {
             return value.getTypeCode();
-        }
-
-        @Override
-        public int getOffset() {
-            return offset;
-        }
-
-        public void setOffset(int offset) {
-            this.offset = offset;
-        }
-
-        public Value getValue() {
-            return value;
-        }
-
-        @Override
-        public String toString() {
-            return "BuilderEntry{" +
-                    "id=" + id +
-                    ", value=" + value +
-                    ", offset=" + offset +
-                    '}';
         }
     }
 }

@@ -218,7 +218,7 @@ public interface TypeHandler {
                 buffer.put(stringBytes);
             }
         }
-        
+
         @Override
         public int estimateSize(Value value) {
             if (value instanceof Value.StringBufferValue) {
@@ -227,8 +227,8 @@ public interface TypeHandler {
                 return VarInt.encodedLength(length) + length;
             } else {
                 Value.StringValue stringValue = (Value.StringValue) value;
-                byte[] utf8Bytes = stringValue.getUtf8Bytes();
-                return VarInt.encodedLength(utf8Bytes.length) + utf8Bytes.length;
+                int utf8Length = stringValue.getUtf8Length();  // Uses cached bytes
+                return VarInt.encodedLength(utf8Length) + utf8Length;
             }
         }
     };
