@@ -41,16 +41,12 @@ public class ComparisonBenchmark {
             new MessagePackCompetitor()
     );
 
-    @Param({"Imprint"})
+    @Param({"Imprint", "Jackson-JSON", "Protobuf", "FlatBuffers", "Avro-Generic", "Thrift", "Kryo", "MessagePack"})
     public String competitorName;
 
     private Competitor competitor;
     private DataGenerator.TestRecord testRecord1;
     private DataGenerator.TestRecord testRecord2;
-
-    public static List<String> competitorName() {
-        return COMPETITORS.stream().map(Competitor::name).collect(Collectors.toList());
-    }
 
     @Setup(Level.Trial)
     public void setup() {
@@ -86,6 +82,11 @@ public class ComparisonBenchmark {
     @Benchmark
     public void mergeAndSerialize(Blackhole bh) {
         competitor.mergeAndSerialize(bh);
+    }
+
+    @Benchmark
+    public void accessField(Blackhole bh) {
+        competitor.accessField(bh);
     }
 
     public static void main(String[] args) throws RunnerException {

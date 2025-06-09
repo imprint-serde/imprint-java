@@ -76,4 +76,14 @@ public class JacksonJsonCompetitor extends AbstractCompetitor {
             throw new RuntimeException(e);
         }
     }
+
+    @Override
+    public void accessField(Blackhole bh) {
+        try {
+            var map = mapper.readValue(serializedRecord, java.util.Map.class);
+            bh.consume(map.get("timestamp"));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 } 

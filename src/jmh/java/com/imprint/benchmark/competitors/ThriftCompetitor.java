@@ -114,4 +114,15 @@ public class ThriftCompetitor extends AbstractCompetitor {
             throw new RuntimeException(e);
         }
     }
+
+    @Override
+    public void accessField(Blackhole bh) {
+        try {
+            var record = new TestRecord();
+            deserializer.deserialize(record, this.serializedRecord);
+            bh.consume(record.getTimestamp());
+        } catch (TException e) {
+            throw new RuntimeException(e);
+        }
+    }
 } 

@@ -88,4 +88,14 @@ public class KryoCompetitor extends AbstractCompetitor {
             throw new RuntimeException(e);
         }
     }
+
+    @Override
+    public void accessField(Blackhole bh) {
+        try (Input input = new Input(serializedRecord)) {
+            DataGenerator.TestRecord record = kryo.readObject(input, DataGenerator.TestRecord.class);
+            bh.consume(record.timestamp);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 } 

@@ -13,4 +13,5 @@ public interface Competitor {
     void deserialize(Blackhole bh);
     void projectAndSerialize(Blackhole bh);
     void mergeAndSerialize(Blackhole bh);
+    void accessField(Blackhole bh);
 } 
