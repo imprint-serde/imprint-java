@@ -1,0 +1,29 @@
+package com.imprint.benchmark.competitors;
+
+import com.imprint.benchmark.DataGenerator;
+
+/**
+ * A minimal base class for competitors, holding the test data.
+ */
+public abstract class AbstractCompetitor implements Competitor {
+
+    protected final String name;
+    protected DataGenerator.TestRecord testData;
+    protected DataGenerator.TestRecord testData2;
+    protected byte[] serializedRecord;
+
+    protected AbstractCompetitor(String name) {
+        this.name = name;
+    }
+
+    @Override
+    public String name() {
+        return name;
+    }
+
+    @Override
+    public void setup(DataGenerator.TestRecord testRecord, DataGenerator.TestRecord testRecord2) {
+        this.testData = testRecord;
+        this.testData2 = testRecord2;
+    }
+} 
