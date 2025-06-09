@@ -5,6 +5,8 @@ import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import com.imprint.types.TypeCode;
 import com.imprint.util.VarInt;
+import it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMap;
 import lombok.Getter;
 
 import java.nio.ByteBuffer;
@@ -32,9 +34,10 @@ public final class ImprintBuffers {
     private final ByteBuffer directoryBuffer; // Raw directory bytes (includes count)
     private final ByteBuffer payload; // Read-only payload view
 
-    // Lazy-loaded directory state. Needs to maintain ordering so that we can binary search the endOffset
-    private TreeMap<Integer, DirectoryEntry> parsedDirectory;
+    // Lazy-loaded directory state.
+    private Int2ObjectSortedMap<DirectoryEntry> parsedDirectory;
     private boolean directoryParsed = false;
+    private int directoryCount = -1;
 
     /**
      * Creates buffers from raw data (used during deserialization).
@@ -45,24 +48,26 @@ public final class ImprintBuffers {
     }
 
     /**
-     * Creates buffers from a pre-parsed directory (used during construction).
-     * This constructor is used by the ImprintRecordBuilder path. It creates
-     * a serialized directory buffer but defers parsing it into a map until it's actually needed.
+     * Creates buffers from a pre-sorted list of entries (most efficient builder path).
+     * Immediately creates the parsed index and the serialized buffer.
      */
-    public ImprintBuffers(Collection<? extends DirectoryEntry> directory, ByteBuffer payload) {
-        this.directoryBuffer = ImprintBuffers.createDirectoryBuffer(Objects.requireNonNull(directory));
+    public ImprintBuffers(List<? extends DirectoryEntry> sortedDirectory, ByteBuffer payload) {
+        this.directoryBuffer = ImprintBuffers.createDirectoryBuffer(sortedDirectory);
         this.payload = payload.asReadOnlyBuffer();
     }
 
     /**
-     * Creates buffers from a pre-parsed and sorted directory map (used by ImprintRecordBuilder).
-     * This is an optimized path that avoids creating an intermediate List-to-Map conversion.
-     * This constructor is used by the ImprintRecordBuilder path. It creates
-     * a serialized directory buffer but defers parsing it into a map until it's actually needed.
+     * Creates buffers from a pre-parsed and sorted directory map containing final, simple entries.
+     * This is the most efficient path, as it avoids any further parsing or sorting. The provided
+     * map becomes the definitive parsed directory.
      */
-    public ImprintBuffers(TreeMap<Integer, ? extends DirectoryEntry> directoryMap, ByteBuffer payload) {
-        this.directoryBuffer = ImprintBuffers.createDirectoryBufferFromMap(Objects.requireNonNull(directoryMap));
+    @SuppressWarnings("unchecked")
+    public ImprintBuffers(Int2ObjectSortedMap<? extends DirectoryEntry> parsedDirectory, ByteBuffer payload) {
+        this.directoryBuffer = ImprintBuffers.createDirectoryBufferFromSortedMap(Objects.requireNonNull(parsedDirectory));
         this.payload = payload.asReadOnlyBuffer();
+        this.parsedDirectory = (Int2ObjectSortedMap<DirectoryEntry>) parsedDirectory;
+        this.directoryParsed = true;
+        this.directoryCount = parsedDirectory.size();
     }
 
     /**
@@ -71,6 +76,28 @@ public final class ImprintBuffers {
      */
     public ByteBuffer getFieldBuffer(int fieldId) throws ImprintException {
         var entry = findDirectoryEntry(fieldId);
+        if (entry == null)
+            return null;
+
+        int startOffset = entry.getOffset();
+        int endOffset = findEndOffset(entry);
+
+        if (startOffset < 0 || endOffset < 0 || startOffset > payload.limit() ||
+                endOffset > payload.limit() || startOffset > endOffset) {
+            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW,
+                    "Invalid field buffer range: start=" + startOffset + ", end=" + endOffset + ", payloadLimit=" + payload.limit());
+        }
+
+        var fieldBuffer = payload.duplicate();
+        fieldBuffer.position(startOffset).limit(endOffset);
+        return fieldBuffer;
+    }
+
+    /**
+     * Get a zero-copy ByteBuffer view of a field's data using a pre-fetched DirectoryEntry.
+     * This avoids the cost of re-finding the entry.
+     */
+    public ByteBuffer getFieldBuffer(DirectoryEntry entry) throws ImprintException {
         if (entry == null)
             return null;
 
@@ -98,7 +125,7 @@ public final class ImprintBuffers {
     public DirectoryEntry findDirectoryEntry(int fieldId) throws ImprintException {
         if (directoryParsed)
             return parsedDirectory.get(fieldId);
-         else
+        else
             return findFieldEntryInRawDirectory(fieldId);
     }
 
@@ -117,10 +144,10 @@ public final class ImprintBuffers {
     public int getDirectoryCount() {
         if (directoryParsed)
             return parsedDirectory.size();
+
         try {
-            var countBuffer = directoryBuffer.duplicate();
-            return VarInt.decode(countBuffer).getValue();
-        } catch (Exception e) {
+            return getOrParseDirectoryCount();
+        } catch (ImprintException e) {
             return 0;
         }
     }
@@ -145,13 +172,16 @@ public final class ImprintBuffers {
         var searchBuffer = directoryBuffer.duplicate();
         searchBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
-        int directoryCount = VarInt.decode(searchBuffer).getValue();
-        if (directoryCount == 0)
+        int count = getOrParseDirectoryCount();
+        if (count == 0)
             return null;
 
+        // Advance buffer past the varint to get to the start of the entries.
+        VarInt.decode(searchBuffer);
         int directoryStartPos = searchBuffer.position();
+
         int low = 0;
-        int high = directoryCount - 1;
+        int high = count - 1;
 
         while (low <= high) {
             int mid = (low + high) >>> 1;
@@ -194,19 +224,25 @@ public final class ImprintBuffers {
      * Find the end offset using TreeMap's efficient navigation methods.
      */
     private int findNextOffsetInParsedDirectory(int currentFieldId) {
-        var nextEntry = parsedDirectory.higherEntry(currentFieldId);
-        return nextEntry != null ? nextEntry.getValue().getOffset() : payload.limit();
+        var tailMap = parsedDirectory.tailMap(currentFieldId + 1);
+        if (tailMap.isEmpty()) {
+            return payload.limit();
+        }
+        return tailMap.get(tailMap.firstIntKey()).getOffset();
     }
 
     private int findNextOffsetInRawDirectory(int currentFieldId) throws ImprintException {
         var scanBuffer = directoryBuffer.duplicate();
         scanBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
-        int count = VarInt.decode(scanBuffer).getValue();
+        int count = getOrParseDirectoryCount();
         if (count == 0)
             return payload.limit();
 
+        // Advance buffer past the varint to get to the start of the entries.
+        VarInt.decode(scanBuffer);
         int directoryStartPos = scanBuffer.position();
+
         int low = 0;
         int high = count - 1;
         int nextOffset = payload.limit();
@@ -242,63 +278,133 @@ public final class ImprintBuffers {
     private void ensureDirectoryParsed() {
         if (directoryParsed)
             return;
+
         try {
             var parseBuffer = directoryBuffer.duplicate();
             parseBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
-            var countResult = VarInt.decode(parseBuffer);
-            int count = countResult.getValue();
+            int count = getOrParseDirectoryCount(parseBuffer);
+            this.parsedDirectory = new Int2ObjectAVLTreeMap<>();
 
-            this.parsedDirectory = new TreeMap<>();
             for (int i = 0; i < count; i++) {
                 var entry = deserializeDirectoryEntry(parseBuffer);
-                parsedDirectory.put((int)entry.getId(), entry);
+                this.parsedDirectory.put(entry.getId() , entry);
             }
 
             this.directoryParsed = true;
         } catch (ImprintException e) {
-            throw new RuntimeException("Failed to parse directory", e);
+            // This can happen with a corrupted directory.
+            // In this case, we'll just have an empty (but valid) parsed directory.
+            this.parsedDirectory = new Int2ObjectAVLTreeMap<>();
+            this.directoryParsed = true; // Mark as parsed to avoid repeated errors
         }
     }
 
+    private int getOrParseDirectoryCount() throws ImprintException {
+        if (directoryCount != -1) {
+            return directoryCount;
+        }
+        try {
+            this.directoryCount = VarInt.decode(directoryBuffer.duplicate()).getValue();
+        } catch (ImprintException e) {
+            this.directoryCount = 0; // Cache as 0 on error
+            throw e; // rethrow
+        }
+        return this.directoryCount;
+    }
+
+    private int getOrParseDirectoryCount(ByteBuffer buffer) throws ImprintException {
+        // This method does not cache the count because it's used during parsing
+        // where the buffer is transient. Caching is only for the instance's primary buffer.
+        return VarInt.decode(buffer).getValue();
+    }
+
     /**
-     * Create directory buffer from parsed entries.
+     * Creates a read-only buffer containing the serialized directory.
+     * The input collection does not need to be sorted.
      */
     static ByteBuffer createDirectoryBuffer(Collection<? extends DirectoryEntry> directory) {
-        try {
-            int bufferSize = VarInt.encodedLength(directory.size()) + (directory.size() * Constants.DIR_ENTRY_BYTES);
-            var buffer = ByteBuffer.allocate(bufferSize);
-            buffer.order(ByteOrder.LITTLE_ENDIAN);
-
-            VarInt.encode(directory.size(), buffer);
-            for (var entry : directory)
-                serializeDirectoryEntry(entry, buffer);
-
+        if (directory == null || directory.isEmpty()) {
+            ByteBuffer buffer = ByteBuffer.allocate(1);
+            VarInt.encode(0, buffer);
             buffer.flip();
-            return buffer.asReadOnlyBuffer();
-        } catch (Exception e) {
-            return ByteBuffer.allocate(0).asReadOnlyBuffer();
+            return buffer;
         }
+
+        // Ensure sorted order for binary search compatibility.
+        ArrayList<? extends DirectoryEntry> sortedDirectory;
+        if (directory instanceof ArrayList && isSorted((ArrayList<? extends DirectoryEntry>)directory)) {
+            sortedDirectory = (ArrayList<? extends DirectoryEntry>) directory;
+        } else {
+            sortedDirectory = new ArrayList<>(directory);
+            sortedDirectory.sort(null);
+        }
+
+        int count = sortedDirectory.size();
+        int size = VarInt.encodedLength(count) + (count * Constants.DIR_ENTRY_BYTES);
+        ByteBuffer buffer = ByteBuffer.allocate(size);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        VarInt.encode(count, buffer);
+        for (DirectoryEntry entry : sortedDirectory) {
+            serializeDirectoryEntry(entry, buffer);
+        }
+
+        buffer.flip();
+        return buffer;
     }
 
-    /**
-     * Create directory buffer from a pre-sorted map of entries.
-     */
     static ByteBuffer createDirectoryBufferFromMap(TreeMap<Integer, ? extends DirectoryEntry> directoryMap) {
-        try {
-            int bufferSize = VarInt.encodedLength(directoryMap.size()) + (directoryMap.size() * Constants.DIR_ENTRY_BYTES);
-            var buffer = ByteBuffer.allocate(bufferSize);
-            buffer.order(ByteOrder.LITTLE_ENDIAN);
-
-            VarInt.encode(directoryMap.size(), buffer);
-            for (var entry : directoryMap.values())
-                serializeDirectoryEntry(entry, buffer);
-
+        if (directoryMap == null || directoryMap.isEmpty()) {
+            ByteBuffer buffer = ByteBuffer.allocate(1);
+            VarInt.encode(0, buffer);
             buffer.flip();
-            return buffer.asReadOnlyBuffer();
-        } catch (Exception e) {
-            return ByteBuffer.allocate(0).asReadOnlyBuffer();
+            return buffer;
         }
+
+        int count = directoryMap.size();
+        int size = VarInt.encodedLength(count) + (count * Constants.DIR_ENTRY_BYTES);
+        var buffer = ByteBuffer.allocate(size);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        VarInt.encode(count, buffer);
+        for (var entry : directoryMap.values()) {
+            serializeDirectoryEntry(entry, buffer);
+        }
+
+        buffer.flip();
+        return buffer;
+    }
+
+    static ByteBuffer createDirectoryBufferFromSortedMap(Int2ObjectSortedMap<? extends DirectoryEntry> directoryMap) {
+        if (directoryMap == null || directoryMap.isEmpty()) {
+            ByteBuffer buffer = ByteBuffer.allocate(1);
+            VarInt.encode(0, buffer);
+            buffer.flip();
+            return buffer;
+        }
+
+        int count = directoryMap.size();
+        int size = VarInt.encodedLength(count) + (count * Constants.DIR_ENTRY_BYTES);
+        var buffer = ByteBuffer.allocate(size);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        VarInt.encode(count, buffer);
+        for (var entry : directoryMap.int2ObjectEntrySet()) {
+            serializeDirectoryEntry(entry.getValue(), buffer);
+        }
+
+        buffer.flip();
+        return buffer;
+    }
+
+    private static boolean isSorted(ArrayList<? extends DirectoryEntry> list) {
+        for (int i = 0; i < list.size() - 1; i++) {
+            if (list.get(i).getId() > list.get(i + 1).getId()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

@@ -1,19 +1,14 @@
 package com.imprint.core;
 
 import com.imprint.error.ImprintException;
+import it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMap;
+import it.unimi.dsi.fastutil.ints.IntSet;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.TreeMap;
+import java.util.*;
 
 /**
  * Provides a framework for lazy, zero-copy transformations of Imprint records.
@@ -29,8 +24,6 @@ public final class ImprintStream {
     private ImprintStream(Plan plan) {
         this.plan = Objects.requireNonNull(plan);
     }
-
-    // ========== PLAN DATA STRUCTURES ==========
 
     /**
      * The internal representation of the transformation plan.
@@ -56,11 +49,11 @@ public final class ImprintStream {
      */
     private static final class ProjectPlan implements Plan {
         final Plan previous;
-        final Set<Integer> fieldIds;
+        final IntSet fieldIds;
 
         private ProjectPlan(Plan previous, int... fieldIds) {
             this.previous = Objects.requireNonNull(previous);
-            this.fieldIds = new HashSet<>();
+            this.fieldIds = new IntOpenHashSet();
             for (int id : fieldIds) {
                 this.fieldIds.add(id);
             }
@@ -143,6 +136,51 @@ public final class ImprintStream {
 
         public ImprintRecord execute() {
             // Unwind the plan's linked-list structure into a forward-order list of operations.
+            var planList = getPlans();
+            Collections.reverse(planList);
+
+            // This map holds the set of fields being built, sorted by field ID.
+            var resolvedFields = new Int2ObjectAVLTreeMap<FieldSource>();
+
+            // Iteratively evaluate the plan step-by-step.
+            for (var planStep : planList) {
+                if (planStep instanceof SourcePlan) {
+                    var sourcePlan = (SourcePlan) planStep;
+                    for (var entry : sourcePlan.source.getDirectory()) {
+                        resolvedFields.put(entry.getId(), new FieldSource(sourcePlan.source, entry));
+                    }
+                } else if (planStep instanceof ProjectPlan) {
+                    var projectPlan = (ProjectPlan) planStep;
+                    // Apply projection to the current state of resolved fields.
+                    // Keep only fields that are in the projection set
+                    var keysToRemove = new IntOpenHashSet();
+                    for (int fieldId : resolvedFields.keySet()) {
+                        if (!projectPlan.fieldIds.contains(fieldId)) {
+                            keysToRemove.add(fieldId);
+                        }
+                    }
+                    for (int keyToRemove : keysToRemove) {
+                        resolvedFields.remove(keyToRemove);
+                    }
+                } else if (planStep instanceof MergePlan) {
+                    var mergePlan = (MergePlan) planStep;
+                    // Add fields from other records if they aren't already in the map.
+                    for (var otherRecord : mergePlan.others) {
+                        for (var entry : otherRecord.getDirectory()) {
+                            int fieldId = entry.getId();
+                            if (!resolvedFields.containsKey(fieldId)) {
+                                resolvedFields.put(fieldId, new FieldSource(otherRecord, entry));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Once the final field set is determined, build the record.
+            return build(resolvedFields);
+        }
+
+        private ArrayList<Plan> getPlans() {
             var planList = new ArrayList<Plan>();
             var current = plan;
             while (current != null) {
@@ -155,38 +193,10 @@ public final class ImprintStream {
                     current = null; // End of the chain
                 }
             }
-            Collections.reverse(planList);
-
-            // This map holds the set of fields being built, sorted by ID.
-            var resolvedFields = new TreeMap<Integer, FieldSource>();
-
-            // Iteratively evaluate the plan step-by-step.
-            for (var planStep : planList) {
-                if (planStep instanceof SourcePlan) {
-                    var sourcePlan = (SourcePlan) planStep;
-                    for (var entry : sourcePlan.source.getDirectory()) {
-                        resolvedFields.put((int) entry.getId(), new FieldSource(sourcePlan.source, entry));
-                    }
-                } else if (planStep instanceof ProjectPlan) {
-                    var projectPlan = (ProjectPlan) planStep;
-                    // Apply projection to the current state of resolved fields.
-                    resolvedFields.keySet().retainAll(projectPlan.fieldIds);
-                } else if (planStep instanceof MergePlan) {
-                    var mergePlan = (MergePlan) planStep;
-                    // Add fields from other records if they aren't already in the map.
-                    for (var otherRecord : mergePlan.others) {
-                        for (var entry : otherRecord.getDirectory()) {
-                            resolvedFields.putIfAbsent((int) entry.getId(), new FieldSource(otherRecord, entry));
-                        }
-                    }
-                }
-            }
-
-            // Once the final field set is determined, build the record.
-            return build(resolvedFields);
+            return planList;
         }
 
-        private ImprintRecord build(TreeMap<Integer, FieldSource> finalFields) {
+        private ImprintRecord build(Int2ObjectSortedMap<FieldSource> finalFields) {
             if (finalFields.isEmpty()) {
                 // To-Do: Need a way to get the schemaId for an empty record.
                 // For now, returning null or using a default.
@@ -199,16 +209,22 @@ public final class ImprintStream {
             }
 
             // Determine the schema from the first field's source record.
-            SchemaId schemaId = finalFields.firstEntry().getValue().record.getHeader().getSchemaId();
+            SchemaId schemaId = finalFields.get(finalFields.firstIntKey()).record.getHeader().getSchemaId();
 
             // 1. Calculate final payload size and prepare directory.
             int payloadSize = 0;
-            var newDirectoryMap = new TreeMap<Integer, DirectoryEntry>();
-            for (var entry : finalFields.entrySet()) {
+            var newDirectoryMap = new Int2ObjectAVLTreeMap<DirectoryEntry>();
+
+            // Iterate over fields in sorted order
+            for (var entry : finalFields.int2ObjectEntrySet()) {
+                int fieldId = entry.getIntKey();
                 var fieldSource = entry.getValue();
                 int fieldLength = fieldSource.getLength();
 
-                newDirectoryMap.put(entry.getKey(), new SimpleDirectoryEntry(fieldSource.entry.getId(), fieldSource.entry.getTypeCode(), payloadSize));
+                newDirectoryMap.put(fieldId, new SimpleDirectoryEntry(
+                        fieldSource.entry.getId(),
+                        fieldSource.entry.getTypeCode(),
+                        payloadSize));
                 payloadSize += fieldLength;
             }
 
@@ -254,4 +270,4 @@ public final class ImprintStream {
             }
         }
     }
-} 
+}

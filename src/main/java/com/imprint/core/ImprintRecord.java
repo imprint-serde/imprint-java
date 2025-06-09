@@ -7,6 +7,7 @@ import com.imprint.types.MapKey;
 import com.imprint.types.TypeCode;
 import com.imprint.types.Value;
 import com.imprint.util.VarInt;
+import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMap;
 import lombok.Getter;
 
 import java.nio.ByteBuffer;
@@ -35,19 +36,19 @@ public final class ImprintRecord {
     }
 
     /**
-     * Creates a record from pre-parsed directory (used by ImprintWriter).
+     * Creates a record from a pre-sorted list of entries (most efficient builder path).
      */
-    ImprintRecord(Header header, Collection<? extends DirectoryEntry> directory, ByteBuffer payload) {
+    ImprintRecord(Header header, List<? extends DirectoryEntry> sortedDirectory, ByteBuffer payload) {
         this.header = Objects.requireNonNull(header, "Header cannot be null");
-        this.buffers = new ImprintBuffers(directory, payload);
+        this.buffers = new ImprintBuffers(sortedDirectory, payload);
     }
 
     /**
-     * Creates a record from a pre-parsed and sorted directory map (used by ImprintRecordBuilder).
+     * Creates a record from a pre-built and sorted FastUtil map (most efficient builder path).
      */
-    ImprintRecord(Header header, TreeMap<Integer, ? extends DirectoryEntry> directoryMap, ByteBuffer payload) {
+    ImprintRecord(Header header, Int2ObjectSortedMap<? extends DirectoryEntry> parsedDirectory, ByteBuffer payload) {
         this.header = Objects.requireNonNull(header, "Header cannot be null");
-        this.buffers = new ImprintBuffers(directoryMap, payload);
+        this.buffers = new ImprintBuffers(parsedDirectory, payload);
     }
 
     // ========== FIELD ACCESS METHODS ==========
@@ -80,6 +81,18 @@ public final class ImprintRecord {
     }
 
     /**
+     * Get raw bytes for a field using a pre-fetched DirectoryEntry.
+     * This avoids the cost of re-finding the entry metadata.
+     */
+    public ByteBuffer getRawBytes(DirectoryEntry entry) {
+        try {
+            return buffers.getFieldBuffer(entry);
+        } catch (ImprintException e) {
+            return null;
+        }
+    }
+
+    /**
      * Project a subset of fields from this record.
      *
      * @param fieldIds Array of field IDs to include in the projection
@@ -106,6 +119,37 @@ public final class ImprintRecord {
      */
     public List<DirectoryEntry> getDirectory() {
         return buffers.getDirectory();
+    }
+
+    /**
+     * Finds a directory entry by its field ID.
+     * This is an efficient lookup that avoids full directory deserialization if possible.
+     *
+     * @param fieldId The ID of the field to find.
+     * @return The DirectoryEntry if found, otherwise null.
+     */
+    public DirectoryEntry getDirectoryEntry(int fieldId) {
+        try {
+            return buffers.findDirectoryEntry(fieldId);
+        } catch (ImprintException e) {
+            // This can happen with a corrupted directory, in which case we assume it doesn't exist.
+            return null;
+        }
+    }
+
+    /**
+     * Checks if a field with the given ID exists in the record.
+     *
+     * @param fieldId The ID of the field to check.
+     * @return true if the field exists, false otherwise.
+     */
+    public boolean hasField(int fieldId) {
+        try {
+            return buffers.findDirectoryEntry(fieldId) != null;
+        } catch (ImprintException e) {
+            // This can happen with a corrupted directory, in which case we assume it doesn't exist.
+            return false;
+        }
     }
 
     // ========== TYPED GETTERS ==========
@@ -194,13 +238,41 @@ public final class ImprintRecord {
      * This provides a direct serialization path without needing a live ImprintRecord instance.
      *
      * @param schemaId  The schema identifier for the record.
-     * @param directory The list of directory entries, which must be sorted by field ID.
+     * @param directory The list of directory entries, which will be sorted if not already.
      * @param payload   The ByteBuffer containing all field data concatenated.
      * @return A read-only ByteBuffer with the complete serialized record.
      */
     public static ByteBuffer serialize(SchemaId schemaId, Collection<? extends DirectoryEntry> directory, ByteBuffer payload) {
         var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
         var directoryBuffer = ImprintBuffers.createDirectoryBuffer(directory);
+
+        int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
+        var finalBuffer = ByteBuffer.allocate(finalSize);
+        finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        // Assemble the final record
+        serializeHeader(header, finalBuffer);
+        finalBuffer.put(directoryBuffer);
+        finalBuffer.put(payload);
+
+        finalBuffer.flip();
+        return finalBuffer.asReadOnlyBuffer();
+    }
+
+    /**
+     * Serializes the components of a record into a single ByteBuffer.
+     * This provides a direct serialization path without needing a live ImprintRecord instance.
+     * This is an optimized version that assumes the list is pre-sorted by field ID.
+     *
+     * @param schemaId  The schema identifier for the record.
+     * @param sortedDirectory The list of directory entries, which MUST be sorted by field ID.
+     * @param payload   The ByteBuffer containing all field data concatenated.
+     * @return A read-only ByteBuffer with the complete serialized record.
+     */
+    public static ByteBuffer serialize(SchemaId schemaId, List<? extends DirectoryEntry> sortedDirectory, ByteBuffer payload) {
+        var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
+        // This createDirectoryBuffer is optimized for a pre-sorted list.
+        var directoryBuffer = ImprintBuffers.createDirectoryBuffer(sortedDirectory);
 
         int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
         var finalBuffer = ByteBuffer.allocate(finalSize);
@@ -227,6 +299,32 @@ public final class ImprintRecord {
     public static ByteBuffer serialize(SchemaId schemaId, TreeMap<Integer, ? extends DirectoryEntry> directoryMap, ByteBuffer payload) {
         var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
         var directoryBuffer = ImprintBuffers.createDirectoryBufferFromMap(directoryMap);
+
+        int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
+        var finalBuffer = ByteBuffer.allocate(finalSize);
+        finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        // Assemble the final record
+        serializeHeader(header, finalBuffer);
+        finalBuffer.put(directoryBuffer);
+        finalBuffer.put(payload);
+
+        finalBuffer.flip();
+        return finalBuffer.asReadOnlyBuffer();
+    }
+
+    /**
+     * Serializes the components of a record into a single ByteBuffer using a pre-built sorted map.
+     * This is the most efficient path for "write-only" scenarios, used by the builder.
+     *
+     * @param schemaId     The schema identifier for the record.
+     * @param directoryMap The sorted map of directory entries.
+     * @param payload      The ByteBuffer containing all field data concatenated.
+     * @return A read-only ByteBuffer with the complete serialized record.
+     */
+    public static ByteBuffer serialize(SchemaId schemaId, Int2ObjectSortedMap<? extends DirectoryEntry> directoryMap, ByteBuffer payload) {
+        var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
+        var directoryBuffer = ImprintBuffers.createDirectoryBufferFromSortedMap(directoryMap);
 
         int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
         var finalBuffer = ByteBuffer.allocate(finalSize);
@@ -348,7 +446,7 @@ public final class ImprintRecord {
         byte magic = buffer.get();
         if (magic != Constants.MAGIC) {
             throw new ImprintException(ErrorType.INVALID_MAGIC, "Invalid magic byte: expected 0x" + Integer.toHexString(Constants.MAGIC) +
-                            ", got 0x" + Integer.toHexString(magic & 0xFF));
+                    ", got 0x" + Integer.toHexString(magic & 0xFF));
         }
 
         byte version = buffer.get();

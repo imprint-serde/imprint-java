@@ -19,11 +19,19 @@ public enum TypeCode {
     ARRAY(0x8, TypeHandler.ARRAY),
     MAP(0x9, TypeHandler.MAP),
     ROW(0xA, null);   // TODO: implement (basically a placeholder for user-defined type)
-    
+
     @Getter
     private final byte code;
     private final TypeHandler handler;
-    
+
+    private static final TypeCode[] LOOKUP = new TypeCode[11];
+
+    static {
+        for (var type : values()) {
+            LOOKUP[type.code] = type;
+        }
+    }
+
     TypeCode(int code, TypeHandler handler) {
         this.code = (byte) code;
         this.handler = handler;
@@ -35,14 +43,13 @@ public enum TypeCode {
         }
         return handler;
     }
-    
+
     public static TypeCode fromByte(byte code) throws ImprintException {
-        for (TypeCode type : values()) {
-            if (type.code == code) {
-                return type;
-            }
+        if (code >= 0 && code < LOOKUP.length) {
+            var type = LOOKUP[code];
+            if (type != null) return type;
         }
-        throw new ImprintException(ErrorType.INVALID_TYPE_CODE, 
-                                 "Unknown type code: 0x" + Integer.toHexString(code & 0xFF));
+        throw new ImprintException(ErrorType.INVALID_TYPE_CODE,
+                "Unknown type code: 0x" + Integer.toHexString(code & 0xFF));
     }
 }

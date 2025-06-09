@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
+                   package="com.imprint.benchmark.sbe"
+                   id="1"
+                   version="1"
+                   semanticVersion="1.0.0"
+                   description="Test Record Schema for Benchmarking"
+                   byteOrder="littleEndian">
+
+    <types>
+        <composite name="messageHeader" description="Message identifiers and length of message root">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+
+        <composite name="groupSizeEncoding" description="Repeating group dimensions">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="numInGroup" primitiveType="uint16"/>
+        </composite>
+
+        <composite name="varDataEncoding" description="Variable length data">
+            <type name="length" primitiveType="uint32" maxValue="1073741824"/>
+            <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+        </composite>
+    </types>
+
+    <!-- Main test record message -->
+    <sbe:message name="TestRecord" id="1" description="Test Record Message">
+        <!-- Fixed-size fields first (for optimal layout) -->
+        <field name="timestamp" id="1" type="int64" description="Timestamp in milliseconds"/>
+        <field name="flags" id="2" type="int32" description="Bit flags"/>
+        <field name="active" id="3" type="uint8" description="Boolean active flag (0/1)"/>
+        <field name="value" id="4" type="double" description="Double precision value"/>
+
+        <!-- Variable-length data fields -->
+        <data name="id" id="5" type="varDataEncoding" description="Record identifier string"/>
+        <data name="data" id="6" type="varDataEncoding" description="Binary data payload"/>
+
+        <!-- Repeating groups -->
+        <group name="tags" id="7" dimensionType="groupSizeEncoding" description="List of integer tags">
+            <field name="tag" id="8" type="int32" description="Individual tag value"/>
+        </group>
+
+        <group name="metadata" id="9" dimensionType="groupSizeEncoding" description="Key-value metadata pairs">
+            <data name="key" id="10" type="varDataEncoding" description="Metadata key"/>
+            <data name="value" id="11" type="varDataEncoding" description="Metadata value"/>
+        </group>
+    </sbe:message>
+
+    <!-- Projected record for benchmark testing -->
+    <sbe:message name="ProjectedRecord" id="2" description="Projected subset of TestRecord">
+        <field name="timestamp" id="1" type="int64" description="Timestamp in milliseconds"/>
+        <data name="id" id="2" type="varDataEncoding" description="Record identifier string"/>
+        <group name="tags" id="3" dimensionType="groupSizeEncoding" description="Subset of tags">
+            <field name="tag" id="4" type="int32" description="Individual tag value"/>
+        </group>
+    </sbe:message>
+
+</sbe:messageSchema>

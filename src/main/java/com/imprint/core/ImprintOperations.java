@@ -2,12 +2,14 @@ package com.imprint.core;
 
 import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
-import lombok.Value;
 import lombok.experimental.UtilityClass;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 @UtilityClass
 public class ImprintOperations {
@@ -29,41 +31,34 @@ public class ImprintOperations {
      * @return New ImprintRecord containing only the requested fields
      */
     public static ImprintRecord project(ImprintRecord record, int... fieldIds) {
-        // Sort and deduplicate field IDs for efficient matching with sorted directory
+        // Sort and deduplicate field IDs for efficient matching
         int[] sortedFieldIds = Arrays.stream(fieldIds).distinct().sorted().toArray();
-        if (sortedFieldIds.length == 0)
+        if (sortedFieldIds.length == 0) {
             return createEmptyRecord(record.getHeader().getSchemaId());
-
-        //eager fetch the entire directory (can this be lazy and just done per field?)
-        var sourceDirectory = record.getDirectory();
-        var newDirectory = new ArrayList<DirectoryEntry>(sortedFieldIds.length);
-        var ranges = new ArrayList<FieldRange>();
-
-        // Iterate through directory and compute ranges to copy
-        int fieldIdsIdx = 0;
-        int directoryIdx = 0;
-        int currentOffset = 0;
-
-        while (directoryIdx < sourceDirectory.size() && fieldIdsIdx < sortedFieldIds.length) {
-            var field = sourceDirectory.get(directoryIdx);
-            if (field.getId() == sortedFieldIds[fieldIdsIdx]) {
-                // Calculate field length using next field's offset
-                int nextOffset = (directoryIdx + 1 < sourceDirectory.size()) ?
-                        sourceDirectory.get(directoryIdx + 1).getOffset() :
-                        record.getBuffers().getPayload().limit();
-                int fieldLength = nextOffset - field.getOffset();
-
-                newDirectory.add(new SimpleDirectoryEntry(field.getId(), field.getTypeCode(), currentOffset));
-                ranges.add(new FieldRange(field.getOffset(), nextOffset));
-
-                currentOffset += fieldLength;
-                fieldIdsIdx++;
-            }
-            directoryIdx++;
         }
 
-        // Build new payload from ranges
-        var newPayload = buildPayloadFromRanges(record.getBuffers().getPayload(), ranges);
+        var newDirectory = new ArrayList<DirectoryEntry>(sortedFieldIds.length);
+        var payloadChunks = new ArrayList<ByteBuffer>(sortedFieldIds.length);
+        int currentOffset = 0;
+
+        for (int fieldId : sortedFieldIds) {
+            // Use efficient lookup for each field's metadata. Returns null on failure.
+            DirectoryEntry sourceEntry = record.getDirectoryEntry(fieldId);
+
+            // If field exists, get its payload and add to the new record components
+            if (sourceEntry != null) {
+                ByteBuffer fieldPayload = record.getRawBytes(sourceEntry);
+                // This check is for internal consistency. If an entry exists, payload should too.
+                if (fieldPayload != null) {
+                    newDirectory.add(new SimpleDirectoryEntry((short)fieldId, sourceEntry.getTypeCode(), currentOffset));
+                    payloadChunks.add(fieldPayload);
+                    currentOffset += fieldPayload.remaining();
+                }
+            }
+        }
+
+        // Build new payload from collected chunks
+        ByteBuffer newPayload = buildPayloadFromChunks(payloadChunks);
 
         // Create new header with updated payload size
         // TODO: compute correct schema hash
@@ -120,12 +115,12 @@ public class ImprintOperations {
                     secondIdx++;
                 }
 
-                currentPayload = first.getRawBytes(currentEntry.getId());
+                currentPayload = first.getRawBytes(currentEntry);
                 firstIdx++;
             } else {
                 // Take from second record
                 currentEntry = secondDir.get(secondIdx);
-                currentPayload = second.getRawBytes(currentEntry.getId());
+                currentPayload = second.getRawBytes(currentEntry);
                 secondIdx++;
             }
 
@@ -148,37 +143,6 @@ public class ImprintOperations {
         var newHeader = new Header(first.getHeader().getFlags(), first.getHeader().getSchemaId(), mergedPayload.remaining());
 
         return new ImprintRecord(newHeader, newDirectory, mergedPayload);
-    }
-
-    /**
-     * Represents a range of bytes to copy from source payload.
-     */
-    @Value
-    private static class FieldRange {
-        int start;
-        int end;
-
-        int length() {
-            return end - start;
-        }
-    }
-
-    /**
-     * Build a new payload buffer from field ranges in the source payload.
-     */
-    private static ByteBuffer buildPayloadFromRanges(ByteBuffer sourcePayload, List<FieldRange> ranges) {
-        int totalSize = ranges.stream().mapToInt(FieldRange::length).sum();
-        var newPayload = ByteBuffer.allocate(totalSize);
-        newPayload.order(ByteOrder.LITTLE_ENDIAN);
-
-        for (var range : ranges) {
-            var sourceSlice = sourcePayload.duplicate();
-            sourceSlice.position(range.start).limit(range.end);
-            newPayload.put(sourceSlice);
-        }
-
-        newPayload.flip();
-        return newPayload;
     }
 
     /**

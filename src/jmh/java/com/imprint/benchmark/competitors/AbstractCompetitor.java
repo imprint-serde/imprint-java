@@ -11,7 +11,6 @@ public abstract class AbstractCompetitor implements Competitor {
     protected final String name;
     protected DataGenerator.TestRecord testData;
     protected DataGenerator.TestRecord testData2;
-    protected byte[] serializedRecord;
 
     protected AbstractCompetitor(String name) {
         this.name = name;
