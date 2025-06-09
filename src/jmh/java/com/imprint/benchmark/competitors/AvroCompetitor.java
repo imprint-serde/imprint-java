@@ -153,4 +153,15 @@ public class AvroCompetitor extends AbstractCompetitor {
             throw new RuntimeException(e);
         }
     }
+
+    @Override
+    public void accessField(Blackhole bh) {
+        try {
+            BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(serializedRecord, null);
+            GenericRecord record = reader.read(null, decoder);
+            bh.consume(record.get("timestamp"));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 } 

@@ -66,8 +66,7 @@ public class FlatBuffersCompetitor extends AbstractCompetitor {
 
     @Override
     public void projectAndSerialize(Blackhole bh) {
-        // FlatBuffers excels here. No need to re-serialize. We "project" by reading.
-        // But to keep the benchmark fair ("project AND serialize"), we build a new buffer.
+
         FlatBufferBuilder builder = new FlatBufferBuilder(256);
         var original = TestRecord.getRootAsTestRecord(serializedRecord);
 
@@ -133,5 +132,10 @@ public class FlatBuffersCompetitor extends AbstractCompetitor {
         int recordOffset = TestRecord.endTestRecord(builder);
         builder.finish(recordOffset);
         bh.consume(builder.dataBuffer());
+    }
+
+    @Override
+    public void accessField(Blackhole bh) {
+        bh.consume(TestRecord.getRootAsTestRecord(serializedRecord).timestamp());
     }
 } 

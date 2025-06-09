@@ -66,4 +66,13 @@ public class ProtobufCompetitor extends AbstractCompetitor {
         var merged = record1.toBuilder().mergeFrom(record2).build();
         bh.consume(merged.toByteArray());
     }
+
+    @Override
+    public void accessField(Blackhole bh) {
+        try {
+            bh.consume(TestRecordOuterClass.TestRecord.parseFrom(serializedRecord).getTimestamp());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 } 
