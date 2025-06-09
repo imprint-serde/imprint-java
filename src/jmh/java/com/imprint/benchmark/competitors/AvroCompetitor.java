@@ -20,7 +20,8 @@ public class AvroCompetitor extends AbstractCompetitor {
     private final DatumWriter<GenericRecord> writer;
     private final DatumReader<GenericRecord> reader;
     private final DatumWriter<GenericRecord> projectedWriter;
-    private byte[] serializedRecord;
+    private byte[] serializedRecord1;
+    private byte[] serializedRecord2;
 
     public AvroCompetitor() {
         super("Avro-Generic");
@@ -50,7 +51,8 @@ public class AvroCompetitor extends AbstractCompetitor {
     @Override
     public void setup(DataGenerator.TestRecord testRecord, DataGenerator.TestRecord testRecord2) {
         super.setup(testRecord, testRecord2);
-        this.serializedRecord = buildRecord(testRecord);
+        this.serializedRecord1 = buildRecord(testRecord);
+        this.serializedRecord2 = buildRecord(testRecord2);
     }
 
     private byte[] buildRecord(DataGenerator.TestRecord pojo) {
@@ -82,7 +84,7 @@ public class AvroCompetitor extends AbstractCompetitor {
     @Override
     public void deserialize(Blackhole bh) {
         try {
-            BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(serializedRecord, null);
+            BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(serializedRecord1, null);
             bh.consume(reader.read(null, decoder));
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -91,13 +93,17 @@ public class AvroCompetitor extends AbstractCompetitor {
 
     @Override
     public void projectAndSerialize(Blackhole bh) {
-        // With generic records, we can project by building a new record with the projected schema
-        GenericRecord projected = new GenericData.Record(projectedSchema);
-        projected.put("id", this.testData.id);
-        projected.put("timestamp", this.testData.timestamp);
-        projected.put("tags", this.testData.tags.stream().limit(5).collect(Collectors.toList()));
-
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            // Full round trip: deserialize, project to a new object, re-serialize
+            BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(serializedRecord1, null);
+            GenericRecord original = reader.read(null, decoder);
+            
+            // With generic records, we can project by building a new record with the projected schema
+            GenericRecord projected = new GenericData.Record(projectedSchema);
+            projected.put("id", original.get("id"));
+            projected.put("timestamp", original.get("timestamp"));
+            projected.put("tags", ((java.util.List)original.get("tags")).subList(0, 5));
+
             BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
             projectedWriter.write(projected, encoder);
             encoder.flush();
@@ -110,23 +116,20 @@ public class AvroCompetitor extends AbstractCompetitor {
     @Override
     public void mergeAndSerialize(Blackhole bh) {
         // No direct merge in Avro. Must deserialize, merge manually, and re-serialize.
-        GenericRecord r1 = (GenericRecord) buildAvroRecord(this.testData);
-        GenericRecord r2 = (GenericRecord) buildAvroRecord(this.testData2);
+        GenericRecord r1 = buildAvroRecordFromBytes(this.serializedRecord1);
+        GenericRecord r2 = buildAvroRecordFromBytes(this.serializedRecord2);
 
         GenericRecord merged = new GenericData.Record(schema);
-        for (Schema.Field field : schema.getFields()) {
-            Object val = r1.get(field.name());
-            if (field.name().equals("timestamp")) {
-                val = System.currentTimeMillis();
-            } else if(field.name().equals("active")) {
-                val = false;
-            } else if (r2.hasField(field.name()) && r2.get(field.name()) != null) {
-                 if(!r1.hasField(field.name()) || r1.get(field.name()) == null){
-                     val = r2.get(field.name());
-                 }
-            }
-            merged.put(field.name(), val);
-        }
+        // Simplified merge logic: take most fields from r1, some from r2
+        merged.put("id", r1.get("id"));
+        merged.put("timestamp", System.currentTimeMillis());
+        merged.put("flags", r1.get("flags"));
+        merged.put("active", false);
+        merged.put("value", r1.get("value"));
+        merged.put("data", r1.get("data"));
+        merged.put("tags", r2.get("tags"));
+        merged.put("metadata", r2.get("metadata"));
+        
         bh.consume(buildBytes(merged));
     }
 
@@ -143,6 +146,15 @@ public class AvroCompetitor extends AbstractCompetitor {
         return record;
     }
 
+    private GenericRecord buildAvroRecordFromBytes(byte[] bytes) {
+        try {
+            BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(bytes, null);
+            return reader.read(null, decoder);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private byte[] buildBytes(GenericRecord record) {
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
@@ -157,7 +169,7 @@ public class AvroCompetitor extends AbstractCompetitor {
     @Override
     public void accessField(Blackhole bh) {
         try {
-            BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(serializedRecord, null);
+            BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(serializedRecord1, null);
             GenericRecord record = reader.read(null, decoder);
             bh.consume(record.get("timestamp"));
         } catch (Exception e) {

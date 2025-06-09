@@ -18,6 +18,8 @@ public class ThriftCompetitor extends AbstractCompetitor {
     private final TSerializer serializer;
     private final TDeserializer deserializer;
     private final TestRecord thriftRecord;
+    private byte[] serializedRecord1;
+    private byte[] serializedRecord2;
 
     public ThriftCompetitor() {
         super("Thrift");
@@ -34,8 +36,10 @@ public class ThriftCompetitor extends AbstractCompetitor {
     public void setup(DataGenerator.TestRecord testRecord, DataGenerator.TestRecord testRecord2) {
         super.setup(testRecord, testRecord2);
         try {
-            var record = buildThriftRecord(testRecord);
-            this.serializedRecord = serializer.serialize(record);
+            var record1 = buildThriftRecord(testRecord);
+            this.serializedRecord1 = serializer.serialize(record1);
+            var record2 = buildThriftRecord(testRecord2);
+            this.serializedRecord2 = serializer.serialize(record2);
         } catch (TException e) {
             throw new RuntimeException(e);
         }
@@ -67,7 +71,7 @@ public class ThriftCompetitor extends AbstractCompetitor {
     public void deserialize(Blackhole bh) {
         try {
             var record = new TestRecord();
-            deserializer.deserialize(record, this.serializedRecord);
+            deserializer.deserialize(record, this.serializedRecord1);
             bh.consume(record);
         } catch (TException e) {
             throw new RuntimeException(e);
@@ -77,10 +81,14 @@ public class ThriftCompetitor extends AbstractCompetitor {
     @Override
     public void projectAndSerialize(Blackhole bh) {
         try {
+            // Full round trip: deserialize, project to a new object, re-serialize
+            var original = new TestRecord();
+            deserializer.deserialize(original, this.serializedRecord1);
+
             var projected = new ProjectedRecord();
-            projected.setId(this.testData.id);
-            projected.setTimestamp(this.testData.timestamp);
-            projected.setTags(this.testData.tags.stream().limit(5).collect(Collectors.toList()));
+            projected.setId(original.getId());
+            projected.setTimestamp(original.getTimestamp());
+            projected.setTags(original.getTags().stream().limit(5).collect(Collectors.toList()));
             bh.consume(serializer.serialize(projected));
         } catch (TException e) {
             throw new RuntimeException(e);
@@ -90,8 +98,10 @@ public class ThriftCompetitor extends AbstractCompetitor {
     @Override
     public void mergeAndSerialize(Blackhole bh) {
         try {
-            var r1 = buildThriftRecord(this.testData);
-            var r2 = buildThriftRecord(this.testData2);
+            var r1 = new TestRecord();
+            deserializer.deserialize(r1, this.serializedRecord1);
+            var r2 = new TestRecord();
+            deserializer.deserialize(r2, this.serializedRecord2);
 
             var merged = new TestRecord();
             merged.setId(r1.id);
@@ -119,7 +129,7 @@ public class ThriftCompetitor extends AbstractCompetitor {
     public void accessField(Blackhole bh) {
         try {
             var record = new TestRecord();
-            deserializer.deserialize(record, this.serializedRecord);
+            deserializer.deserialize(record, this.serializedRecord1);
             bh.consume(record.getTimestamp());
         } catch (TException e) {
             throw new RuntimeException(e);

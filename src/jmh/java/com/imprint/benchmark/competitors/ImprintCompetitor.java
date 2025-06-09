@@ -13,6 +13,8 @@ public class ImprintCompetitor extends AbstractCompetitor {
 
     private ImprintRecord imprintRecord1;
     private ImprintRecord imprintRecord2;
+    private byte[] serializedRecord1;
+    private byte[] serializedRecord2;
     private static final SchemaId SCHEMA_ID = new SchemaId(1, 1);
 
     public ImprintCompetitor() {
@@ -25,7 +27,14 @@ public class ImprintCompetitor extends AbstractCompetitor {
         try {
             this.imprintRecord1 = buildRecord(testRecord);
             this.imprintRecord2 = buildRecord(testRecord2);
-            this.serializedRecord = imprintRecord1.serializeToBuffer().array();
+            
+            ByteBuffer buf1 = this.imprintRecord1.serializeToBuffer();
+            this.serializedRecord1 = new byte[buf1.remaining()];
+            buf1.get(this.serializedRecord1);
+
+            ByteBuffer buf2 = this.imprintRecord2.serializeToBuffer();
+            this.serializedRecord2 = new byte[buf2.remaining()];
+            buf2.get(this.serializedRecord2);
         } catch (ImprintException e) {
             throw new RuntimeException(e);
         }
@@ -46,17 +55,13 @@ public class ImprintCompetitor extends AbstractCompetitor {
 
     @Override
     public void serialize(Blackhole bh) {
-        try {
-            bh.consume(buildRecord(this.testData).serializeToBuffer());
-        } catch (ImprintException e) {
-            throw new RuntimeException(e);
-        }
+        bh.consume(this.imprintRecord1.serializeToBuffer());
     }
 
     @Override
     public void deserialize(Blackhole bh) {
         try {
-            bh.consume(ImprintRecord.deserialize(this.serializedRecord));
+            bh.consume(ImprintRecord.deserialize(this.serializedRecord1));
         } catch (ImprintException e) {
             throw new RuntimeException(e);
         }
@@ -64,13 +69,21 @@ public class ImprintCompetitor extends AbstractCompetitor {
 
     @Override
     public void projectAndSerialize(Blackhole bh) {
-        bh.consume(imprintRecord1.project(0, 1, 6).serializeToBuffer());
+        try {
+            ImprintRecord record = ImprintRecord.deserialize(this.serializedRecord1);
+            ImprintRecord projected = record.project(0, 1, 6);
+            bh.consume(projected.serializeToBuffer());
+        } catch (ImprintException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
     public void mergeAndSerialize(Blackhole bh) {
         try {
-            var merged = ImprintOperations.merge(this.imprintRecord1, this.imprintRecord2);
+            var r1 = ImprintRecord.deserialize(this.serializedRecord1);
+            var r2 = ImprintRecord.deserialize(this.serializedRecord2);
+            var merged = ImprintOperations.merge(r1, r2);
             bh.consume(merged.serializeToBuffer());
         } catch (ImprintException e) {
             throw new RuntimeException(e);

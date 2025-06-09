@@ -47,11 +47,15 @@ public class MessagePackCompetitor extends AbstractCompetitor {
 
     @Override
     public void projectAndSerialize(Blackhole bh) {
-        var projected = new DataGenerator.ProjectedRecord();
-        projected.id = this.testData.id;
-        projected.timestamp = this.testData.timestamp;
-        projected.tags = this.testData.tags.subList(0, 5);
         try {
+            // Full round trip: deserialize, project to a new object, re-serialize
+            var original = mapper.readValue(serializedRecord, DataGenerator.TestRecord.class);
+
+            var projected = new DataGenerator.ProjectedRecord();
+            projected.id = original.id;
+            projected.timestamp = original.timestamp;
+            projected.tags = original.tags.subList(0, 5);
+            
             bh.consume(mapper.writeValueAsBytes(projected));
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -60,16 +64,20 @@ public class MessagePackCompetitor extends AbstractCompetitor {
 
     @Override
     public void mergeAndSerialize(Blackhole bh) {
-        var merged = new DataGenerator.TestRecord();
-        merged.id = this.testData.id;
-        merged.timestamp = System.currentTimeMillis();
-        merged.flags = this.testData.flags;
-        merged.active = false;
-        merged.value = this.testData.value;
-        merged.data = this.testData.data;
-        merged.tags = this.testData2.tags;
-        merged.metadata = this.testData2.metadata;
         try {
+            var r1 = mapper.readValue(serializedRecord, DataGenerator.TestRecord.class);
+            var r2 = mapper.readValue(serializedRecord2, DataGenerator.TestRecord.class);
+
+            var merged = new DataGenerator.TestRecord();
+            merged.id = r1.id;
+            merged.timestamp = System.currentTimeMillis();
+            merged.flags = r1.flags;
+            merged.active = false;
+            merged.value = r1.value;
+            merged.data = r1.data;
+            merged.tags = r2.tags;
+            merged.metadata = r2.metadata;
+            
             bh.consume(mapper.writeValueAsBytes(merged));
         } catch (Exception e) {
             throw new RuntimeException(e);
