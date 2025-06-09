@@ -405,7 +405,7 @@ public class ComparisonBenchmark {
     // ===== MAIN METHOD TO RUN BENCHMARKS =====
 
     public static void main(String[] args) throws RunnerException {
-        runAll();
+        runFieldAccessBenchmarks();
         // Or, uncomment specific runner methods to execute subsets:
         // runSerializationBenchmarks();
         // runDeserializationBenchmarks();
