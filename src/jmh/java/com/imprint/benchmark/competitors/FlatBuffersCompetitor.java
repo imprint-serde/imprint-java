@@ -10,7 +10,8 @@ import java.util.stream.Collectors;
 
 public class FlatBuffersCompetitor extends AbstractCompetitor {
 
-    private ByteBuffer serializedRecord;
+    private ByteBuffer serializedRecord1;
+    private ByteBuffer serializedRecord2;
 
     public FlatBuffersCompetitor() {
         super("FlatBuffers");
@@ -19,7 +20,8 @@ public class FlatBuffersCompetitor extends AbstractCompetitor {
     @Override
     public void setup(DataGenerator.TestRecord testRecord, DataGenerator.TestRecord testRecord2) {
         super.setup(testRecord, testRecord2);
-        this.serializedRecord = buildRecord(testRecord);
+        this.serializedRecord1 = buildRecord(testRecord);
+        this.serializedRecord2 = buildRecord(testRecord2);
     }
 
     private ByteBuffer buildRecord(DataGenerator.TestRecord pojo) {
@@ -61,16 +63,18 @@ public class FlatBuffersCompetitor extends AbstractCompetitor {
 
     @Override
     public void deserialize(Blackhole bh) {
-        bh.consume(TestRecord.getRootAsTestRecord(serializedRecord));
+        bh.consume(TestRecord.getRootAsTestRecord(serializedRecord1));
     }
 
     @Override
     public void projectAndSerialize(Blackhole bh) {
 
         FlatBufferBuilder builder = new FlatBufferBuilder(256);
-        var original = TestRecord.getRootAsTestRecord(serializedRecord);
+        var original = TestRecord.getRootAsTestRecord(serializedRecord1);
 
         int idOffset = builder.createString(original.id());
+        
+        // Manual sublist
         int[] tagsOffsets = new int[5];
         for (int i = 0; i < 5; i++) {
             tagsOffsets[i] = original.tags(i);
@@ -90,29 +94,31 @@ public class FlatBuffersCompetitor extends AbstractCompetitor {
     @Override
     public void mergeAndSerialize(Blackhole bh) {
         // No direct merge operation. Must read both, build a new one.
-        var r1 = TestRecord.getRootAsTestRecord(serializedRecord);
-        // For simplicity, we don't build and serialize record2.
-        // We'll just merge fields from r1 into a new record.
+        var r1 = TestRecord.getRootAsTestRecord(serializedRecord1);
+        var r2 = TestRecord.getRootAsTestRecord(serializedRecord2);
+        
         FlatBufferBuilder builder = new FlatBufferBuilder(1024);
 
         int idOffset = builder.createString(r1.id());
 
         // Correctly read and rebuild the tags vector
-        int[] tagsArray = new int[r1.tagsLength()];
-        for (int i = 0; i < r1.tagsLength(); i++) {
-            tagsArray[i] = r1.tags(i);
+        // For this benchmark, we'll just take tags from the second record
+        int[] tagsArray = new int[r2.tagsLength()];
+        for (int i = 0; i < r2.tagsLength(); i++) {
+            tagsArray[i] = r2.tags(i);
         }
         int tagsVectorOffset = TestRecord.createTagsVector(builder, tagsArray);
 
-        // Correctly read and rebuild the metadata vector (assuming simple list)
-        int[] metadataOffsets = new int[r1.metadataLength()];
-        for (int i = 0; i < r1.metadataLength(); i++) {
-            metadataOffsets[i] = builder.createString(r1.metadata(i));
+        // Correctly read and rebuild the metadata vector
+        // For this benchmark, we'll just take metadata from the second record
+        int[] metadataOffsets = new int[r2.metadataLength()];
+        for (int i = 0; i < r2.metadataLength(); i++) {
+            metadataOffsets[i] = builder.createString(r2.metadata(i));
         }
         int metadataVectorOffset = TestRecord.createMetadataVector(builder, metadataOffsets);
 
 
-        // Correctly read and rebuild the data vector
+        // Correctly read and rebuild the data vector from r1
         ByteBuffer dataBuffer = r1.dataAsByteBuffer();
         byte[] dataArray = new byte[dataBuffer.remaining()];
         dataBuffer.get(dataArray);
@@ -136,6 +142,6 @@ public class FlatBuffersCompetitor extends AbstractCompetitor {
 
     @Override
     public void accessField(Blackhole bh) {
-        bh.consume(TestRecord.getRootAsTestRecord(serializedRecord).timestamp());
+        bh.consume(TestRecord.getRootAsTestRecord(serializedRecord1).timestamp());
     }
 } 

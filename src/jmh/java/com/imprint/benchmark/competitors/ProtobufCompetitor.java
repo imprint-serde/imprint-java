@@ -6,7 +6,8 @@ import org.openjdk.jmh.infra.Blackhole;
 
 public class ProtobufCompetitor extends AbstractCompetitor {
 
-    private byte[] serializedRecord;
+    private byte[] serializedRecord1;
+    private byte[] serializedRecord2;
 
     public ProtobufCompetitor() {
         super("Protobuf");
@@ -15,7 +16,8 @@ public class ProtobufCompetitor extends AbstractCompetitor {
     @Override
     public void setup(DataGenerator.TestRecord testRecord, DataGenerator.TestRecord testRecord2) {
         super.setup(testRecord, testRecord2);
-        this.serializedRecord = buildRecord(testRecord).toByteArray();
+        this.serializedRecord1 = buildRecord(testRecord).toByteArray();
+        this.serializedRecord2 = buildRecord(testRecord2).toByteArray();
     }
 
     private TestRecordOuterClass.TestRecord buildRecord(DataGenerator.TestRecord pojo) {
@@ -39,7 +41,7 @@ public class ProtobufCompetitor extends AbstractCompetitor {
     @Override
     public void deserialize(Blackhole bh) {
         try {
-            bh.consume(TestRecordOuterClass.TestRecord.parseFrom(serializedRecord));
+            bh.consume(TestRecordOuterClass.TestRecord.parseFrom(serializedRecord1));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -47,30 +49,39 @@ public class ProtobufCompetitor extends AbstractCompetitor {
 
     @Override
     public void projectAndSerialize(Blackhole bh) {
-        // Projection with Protobuf can be done by building a new message with a subset of fields.
-        // There isn't a direct "project" operation on a parsed message.
-        TestRecordOuterClass.TestRecord projected = TestRecordOuterClass.TestRecord.newBuilder()
-                .setId(this.testData.id)
-                .setTimestamp(this.testData.timestamp)
-                .addAllTags(this.testData.tags.subList(0, 5))
-                .build();
-        bh.consume(projected.toByteArray());
+        try {
+            // Full round trip: deserialize, project to a new object, re-serialize
+            var original = TestRecordOuterClass.TestRecord.parseFrom(serializedRecord1);
+
+            TestRecordOuterClass.TestRecord projected = TestRecordOuterClass.TestRecord.newBuilder()
+                    .setId(original.getId())
+                    .setTimestamp(original.getTimestamp())
+                    .addAllTags(original.getTagsList().subList(0, 5))
+                    .build();
+            bh.consume(projected.toByteArray());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
     public void mergeAndSerialize(Blackhole bh) {
-        // Protobuf's `mergeFrom` is a natural fit here.
-        var record1 = buildRecord(this.testData);
-        var record2 = buildRecord(this.testData2);
+        try {
+            // Protobuf's `mergeFrom` is a natural fit here.
+            var record1 = TestRecordOuterClass.TestRecord.parseFrom(serializedRecord1);
+            var record2 = TestRecordOuterClass.TestRecord.parseFrom(serializedRecord2);
 
-        var merged = record1.toBuilder().mergeFrom(record2).build();
-        bh.consume(merged.toByteArray());
+            var merged = record1.toBuilder().mergeFrom(record2).build();
+            bh.consume(merged.toByteArray());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
     public void accessField(Blackhole bh) {
         try {
-            bh.consume(TestRecordOuterClass.TestRecord.parseFrom(serializedRecord).getTimestamp());
+            bh.consume(TestRecordOuterClass.TestRecord.parseFrom(serializedRecord1).getTimestamp());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
