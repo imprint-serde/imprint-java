@@ -42,7 +42,7 @@ dependencies {
     // Suppress SLF4J warnings
     jmhImplementation 'org.slf4j:slf4j-nop:1.7.36'
 
-    // Competitor libraries for benchmarking (JMH only)
+    // Other serialization libraries for benchmarking (JMH only)
     jmhImplementation 'com.google.protobuf:protobuf-java:3.25.1'
     jmhImplementation 'org.apache.avro:avro:1.11.3'
     jmhImplementation 'com.fasterxml.jackson.core:jackson-databind:2.16.0'
@@ -51,15 +51,8 @@ dependencies {
     jmhImplementation 'org.msgpack:msgpack-core:0.9.8'
     jmhImplementation 'org.msgpack:jackson-dataformat-msgpack:0.9.8'
     jmhImplementation 'org.apache.thrift:libthrift:0.19.0'
-
-    // SBE for benchmarking
-    jmhImplementation 'uk.co.real-logic:sbe-all:1.35.3'
-    jmhImplementation 'io.aeron:aeron-client:1.41.2' // SBE has a dependency on Agrona, included in aeron-client
-
-    // FastUtil for high-performance primitive collections
-    implementation 'it.unimi.dsi:fastutil:8.5.12'
     // Required for generated Thrift code on JDK 11+
-    implementation 'javax.annotation:javax.annotation-api:1.3.2'
+    jmhImplementation 'javax.annotation:javax.annotation-api:1.3.2'
 }
 
 protobuf {
@@ -148,9 +141,10 @@ tasks.register('generateFlatBuffers', Exec) {
 }
 
 // Task to download the Thrift compiler
-task downloadThrift(type: Exec) {
+tasks.register('downloadThrift', Exec) {
     description = 'Download Thrift compiler'
     group = 'build setup'
+
     def thriftVersion = "0.19.0"
     def thriftExecutable = file("${buildDir}/thrift/thrift.exe")
     def thriftUrl = "https://archive.apache.org/dist/thrift/${thriftVersion}/thrift-${thriftVersion}.exe"
@@ -174,8 +168,8 @@ task downloadThrift(type: Exec) {
 }
 
 // Task to generate Java code from Thrift IDL files for JMH benchmarks
-task generateJmhThrift(type: Exec) {
-    dependsOn downloadThrift
+tasks.register('generateJmhThrift', Exec) {
+    dependsOn tasks.downloadThrift
     description = 'Generate Java classes from Thrift schema'
     group = 'build'
 
@@ -196,33 +190,6 @@ task generateJmhThrift(type: Exec) {
     }
 }
 
-// Task for SBE code generation
-task generateSbe(type: JavaExec) {
-    description = 'Generate Java classes from SBE schema'
-    group = 'build'
-
-    def outputDir = file("${buildDir}/generated/sbe/java")
-    def schemaFile = file('src/jmh/sbe/schema.xml')
-    def sbeXsd = file('src/jmh/sbe/sbe.xsd')
-
-    // Ensure the sbe-tool is on the classpath for this task
-    classpath = sourceSets.jmh.runtimeClasspath
-
-    main = 'uk.co.real_logic.sbe.SbeTool'
-    systemProperties = [
-            "sbe.output.dir": outputDir.absolutePath,
-            "sbe.validation.xsd": sbeXsd.absolutePath
-    ]
-    args = [ schemaFile.absolutePath ]
-
-    inputs.file(schemaFile)
-    inputs.file(sbeXsd)
-    outputs.dir(outputDir)
-
-    doFirst {
-        outputDir.mkdirs()
-    }
-}
 
 // Add generated FlatBuffers sources to JMH source set
 sourceSets {

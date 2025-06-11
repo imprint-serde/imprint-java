@@ -2,12 +2,7 @@ package com.imprint.core;
 
 import com.imprint.error.ImprintException;
 import com.imprint.types.MapKey;
-import com.imprint.types.TypeCode;
 import com.imprint.types.Value;
-import it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMap;
-import lombok.Getter;
-import lombok.Setter;
 import lombok.SneakyThrows;
 
 import java.nio.ByteBuffer;
@@ -38,7 +33,7 @@ import java.util.*;
 @SuppressWarnings("unused")
 public final class ImprintRecordBuilder {
     private final SchemaId schemaId;
-    private final Int2ObjectSortedMap<BuilderEntry> fields = new Int2ObjectAVLTreeMap<>();
+    private final Map<Integer, Directory.Builder> fields = new TreeMap<>();
     private int estimatedPayloadSize = 0;
 
     ImprintRecordBuilder(SchemaId schemaId) {
@@ -161,7 +156,6 @@ public final class ImprintRecordBuilder {
 
     /**
      * Builds the record and serializes it directly to a ByteBuffer without creating an intermediate ImprintRecord object.
-     * This is the most efficient path for "write-only" scenarios.
      *
      * @return A read-only ByteBuffer containing the fully serialized record.
      * @throws ImprintException if serialization fails.
@@ -182,7 +176,6 @@ public final class ImprintRecordBuilder {
         return ImprintRecord.serialize(schemaId, new ArrayList<>(fields.values()), payloadView);
     }
 
-    // Internal helper methods
     /**
      * Adds or overwrites a field in the record being built.
      * If a field with the given ID already exists, it will be replaced.
@@ -193,7 +186,7 @@ public final class ImprintRecordBuilder {
      */
     private ImprintRecordBuilder addField(int id, Value value) {
         Objects.requireNonNull(value, "Value cannot be null - use nullField() for explicit null values");
-        var newEntry = new BuilderEntry((short) id, value);
+        var newEntry = new Directory.Builder((short) id, value);
 
         // Subtract the size of the old value if it's being replaced.
         var oldEntry = fields.get(id);
@@ -343,26 +336,6 @@ public final class ImprintRecordBuilder {
 
             default:
                 throw new ImprintException(com.imprint.error.ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + value.getTypeCode());
-        }
-    }
-
-
-    @Getter
-    private static class BuilderEntry implements DirectoryEntry {
-        private final short id;
-        private final Value value;
-        @Setter
-        private int offset;
-
-        BuilderEntry(short id, Value value) {
-            this.id = id;
-            this.value = value;
-            this.offset = -1;
-        }
-
-        @Override
-        public TypeCode getTypeCode() {
-            return value.getTypeCode();
         }
     }
 }

@@ -12,7 +12,7 @@ import org.openjdk.jmh.infra.Blackhole;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 
-public class AvroCompetitor extends AbstractCompetitor {
+public class AvroSerializingBenchmark extends AbstractSerializingBenchmark {
 
     private final Schema schema;
     private final Schema projectedSchema;
@@ -22,7 +22,7 @@ public class AvroCompetitor extends AbstractCompetitor {
     private byte[] serializedRecord1;
     private byte[] serializedRecord2;
 
-    public AvroCompetitor() {
+    public AvroSerializingBenchmark() {
         super("Avro-Generic");
         String schemaDefinition = "{\"type\":\"record\",\"name\":\"TestRecord\",\"fields\":["
                 + "{\"name\":\"id\",\"type\":\"string\"},"

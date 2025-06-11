@@ -6,7 +6,7 @@ import org.openjdk.jmh.infra.Blackhole;
 /**
  * Defines the contract for a serialization competitor in the benchmark.
  */
-public interface Competitor {
+public interface SerializingBenchmark {
     String name();
     void setup(DataGenerator.TestRecord testRecord, DataGenerator.TestRecord testRecord2);
     void serialize(Blackhole bh);

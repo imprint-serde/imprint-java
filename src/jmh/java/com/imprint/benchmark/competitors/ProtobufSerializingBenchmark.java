@@ -4,12 +4,12 @@ import com.imprint.benchmark.DataGenerator;
 import com.imprint.benchmark.proto.TestRecordOuterClass;
 import org.openjdk.jmh.infra.Blackhole;
 
-public class ProtobufCompetitor extends AbstractCompetitor {
+public class ProtobufSerializingBenchmark extends AbstractSerializingBenchmark {
 
     private byte[] serializedRecord1;
     private byte[] serializedRecord2;
 
-    public ProtobufCompetitor() {
+    public ProtobufSerializingBenchmark() {
         super("Protobuf");
     }
 
