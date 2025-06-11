@@ -6,13 +6,13 @@ import org.openjdk.jmh.infra.Blackhole;
 /**
  * A minimal base class for competitors, holding the test data.
  */
-public abstract class AbstractCompetitor implements Competitor {
+public abstract class AbstractSerializingBenchmark implements SerializingBenchmark {
 
     protected final String name;
     protected DataGenerator.TestRecord testData;
     protected DataGenerator.TestRecord testData2;
 
-    protected AbstractCompetitor(String name) {
+    protected AbstractSerializingBenchmark(String name) {
         this.name = name;
     }
 

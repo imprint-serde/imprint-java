@@ -1,15 +1,14 @@
-package com.imprint.core;
+package com.imprint.ops;
 
+import com.imprint.core.*;
 import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import lombok.experimental.UtilityClass;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @UtilityClass
 public class ImprintOperations {
@@ -32,25 +31,27 @@ public class ImprintOperations {
      */
     public static ImprintRecord project(ImprintRecord record, int... fieldIds) {
         // Sort and deduplicate field IDs for efficient matching
-        int[] sortedFieldIds = Arrays.stream(fieldIds).distinct().sorted().toArray();
-        if (sortedFieldIds.length == 0) {
+        final var fieldIdSet = Arrays.stream(fieldIds)
+                .boxed()
+                .collect(Collectors.toCollection(TreeSet::new));
+        if (fieldIdSet.isEmpty()) {
             return createEmptyRecord(record.getHeader().getSchemaId());
         }
 
-        var newDirectory = new ArrayList<DirectoryEntry>(sortedFieldIds.length);
-        var payloadChunks = new ArrayList<ByteBuffer>(sortedFieldIds.length);
+        var newDirectory = new ArrayList<Directory>(fieldIdSet.size());
+        var payloadChunks = new ArrayList<ByteBuffer>(fieldIdSet.size());
         int currentOffset = 0;
 
-        for (int fieldId : sortedFieldIds) {
+        for (int fieldId : fieldIdSet) {
             // Use efficient lookup for each field's metadata. Returns null on failure.
-            DirectoryEntry sourceEntry = record.getDirectoryEntry(fieldId);
+            var sourceEntry = record.getDirectoryEntry(fieldId);
 
             // If field exists, get its payload and add to the new record components
             if (sourceEntry != null) {
-                ByteBuffer fieldPayload = record.getRawBytes(sourceEntry);
+                var fieldPayload = record.getRawBytes(sourceEntry);
                 // This check is for internal consistency. If an entry exists, payload should too.
                 if (fieldPayload != null) {
-                    newDirectory.add(new SimpleDirectoryEntry((short)fieldId, sourceEntry.getTypeCode(), currentOffset));
+                    newDirectory.add(new Directory.Entry((short)fieldId, sourceEntry.getTypeCode(), currentOffset));
                     payloadChunks.add(fieldPayload);
                     currentOffset += fieldPayload.remaining();
                 }
@@ -58,7 +59,7 @@ public class ImprintOperations {
         }
 
         // Build new payload from collected chunks
-        ByteBuffer newPayload = buildPayloadFromChunks(payloadChunks);
+        ByteBuffer newPayload = buildPayloadFromChunks(payloadChunks, currentOffset);
 
         // Create new header with updated payload size
         // TODO: compute correct schema hash
@@ -92,7 +93,7 @@ public class ImprintOperations {
         var secondDir = second.getDirectory();
 
         // Pre-allocate for worst case (no overlapping fields)
-        var newDirectory = new ArrayList<DirectoryEntry>(firstDir.size() + secondDir.size());
+        var newDirectory = new ArrayList<Directory>(firstDir.size() + secondDir.size());
         var payloadChunks = new ArrayList<ByteBuffer>();
 
         int firstIdx = 0;
@@ -100,7 +101,7 @@ public class ImprintOperations {
         int currentOffset = 0;
 
         while (firstIdx < firstDir.size() || secondIdx < secondDir.size()) {
-            DirectoryEntry currentEntry;
+            Directory currentEntry;
             ByteBuffer currentPayload;
 
             if (firstIdx < firstDir.size() &&
@@ -114,7 +115,6 @@ public class ImprintOperations {
                         firstDir.get(firstIdx).getId() == secondDir.get(secondIdx).getId()) {
                     secondIdx++;
                 }
-
                 currentPayload = first.getRawBytes(currentEntry);
                 firstIdx++;
             } else {
@@ -128,7 +128,8 @@ public class ImprintOperations {
                 throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Failed to get raw bytes for field " + currentEntry.getId());
 
             // Add adjusted directory entry
-            var newEntry = new SimpleDirectoryEntry(currentEntry.getId(), currentEntry.getTypeCode(), currentOffset);
+            var newEntry = new Directory.Entry(currentEntry.getId(),
+                    currentEntry.getTypeCode(), currentOffset);
             newDirectory.add(newEntry);
 
             // Collect payload chunk
@@ -137,26 +138,22 @@ public class ImprintOperations {
         }
 
         // Build merged payload
-        var mergedPayload = buildPayloadFromChunks(payloadChunks);
+        var mergedPayload = buildPayloadFromChunks(payloadChunks, currentOffset);
 
         // Create header preserving first record's schema ID
-        var newHeader = new Header(first.getHeader().getFlags(), first.getHeader().getSchemaId(), mergedPayload.remaining());
-
+        var newHeader = new Header(first.getHeader().getFlags(),
+                first.getHeader().getSchemaId(), mergedPayload.remaining());
         return new ImprintRecord(newHeader, newDirectory, mergedPayload);
     }
 
     /**
      * Build a new payload buffer by concatenating chunks.
      */
-    private static ByteBuffer buildPayloadFromChunks(List<ByteBuffer> chunks) {
-        int totalSize = chunks.stream().mapToInt(ByteBuffer::remaining).sum();
+    private static ByteBuffer buildPayloadFromChunks(List<ByteBuffer> chunks, int totalSize) {
         var mergedPayload = ByteBuffer.allocate(totalSize);
         mergedPayload.order(ByteOrder.LITTLE_ENDIAN);
-
-        for (var chunk : chunks) {
+        for (var chunk : chunks)
             mergedPayload.put(chunk);
-        }
-
         mergedPayload.flip();
         return mergedPayload;
     }

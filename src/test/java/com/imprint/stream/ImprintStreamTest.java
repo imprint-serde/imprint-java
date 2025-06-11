@@ -1,5 +1,8 @@
-package com.imprint.core;
+package com.imprint.stream;
 
+import com.imprint.core.ImprintRecord;
+import com.imprint.core.SchemaId;
+import com.imprint.stream.ImprintStream;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -12,25 +15,25 @@ class ImprintStreamTest {
         var schemaId2 = new SchemaId(2, 2);
         var schemaId3 = new SchemaId(3, 3);
 
-        ImprintRecord recordA = ImprintRecord.builder(schemaId1)
+        var recordA = ImprintRecord.builder(schemaId1)
                 .field(1, "A1")
                 .field(2, 100)
                 .field(3, true)
                 .build();
 
-        ImprintRecord recordB = ImprintRecord.builder(schemaId2)
+        var recordB = ImprintRecord.builder(schemaId2)
                 .field(2, 200) // Overlaps with A, should be ignored
                 .field(4, "B4")
                 .build();
 
-        ImprintRecord recordC = ImprintRecord.builder(schemaId3)
+        var recordC = ImprintRecord.builder(schemaId3)
                 .field(5, 3.14)
                 .field(1, "C1") // Overlaps with A, should be ignored
                 .build();
 
         // --- Execution ---
-        // Define a chain of operations
-        ImprintRecord finalRecord = ImprintStream.of(recordA)
+        // Chain of operations
+        var finalRecord = ImprintStream.of(recordA)
                 .project(1, 3)     // Keep {1, 3} from A. Current state: {1:A, 3:A}
                 .mergeWith(recordB)    // Merge B. {2:B, 4:B} are added. Current state: {1:A, 3:A, 2:B, 4:B}
                 .mergeWith(recordC)    // Merge C. {5:C} is added. {1:C} is ignored. Final state: {1:A, 3:A, 2:B, 4:B, 5:C}
@@ -63,7 +66,7 @@ class ImprintStreamTest {
         var recordA = ImprintRecord.builder(new SchemaId(1, 1)).field(1, "A").field(2, 100).build();
         var recordB = ImprintRecord.builder(new SchemaId(1, 1)).field(2, 200).field(3, "B").build();
 
-        ImprintRecord finalRecord = ImprintStream.of(recordA)
+        var finalRecord = ImprintStream.of(recordA)
                 .mergeWith(recordB) // virtual record is {1:A, 2:A, 3:B}
                 .project(1, 3)      // final record is {1:A, 3:B}
                 .toRecord();

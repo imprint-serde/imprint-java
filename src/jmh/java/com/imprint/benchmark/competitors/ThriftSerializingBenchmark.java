@@ -9,18 +9,17 @@ import org.apache.thrift.TSerializer;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.openjdk.jmh.infra.Blackhole;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.stream.Collectors;
 
-public class ThriftCompetitor extends AbstractCompetitor {
+public class ThriftSerializingBenchmark extends AbstractSerializingBenchmark {
 
     private final TSerializer serializer;
     private final TDeserializer deserializer;
     private byte[] serializedRecord1;
     private byte[] serializedRecord2;
 
-    public ThriftCompetitor() {
+    public ThriftSerializingBenchmark() {
         super("Thrift");
         try {
             this.serializer = new TSerializer(new TBinaryProtocol.Factory());

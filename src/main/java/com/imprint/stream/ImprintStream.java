@@ -1,17 +1,22 @@
-package com.imprint.core;
+package com.imprint.stream;
 
+import com.imprint.core.*;
 import com.imprint.error.ImprintException;
-import it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMap;
-import it.unimi.dsi.fastutil.ints.IntSet;
-import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.List;
+import java.util.NavigableMap;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
 
 /**
- * Provides a framework for lazy, zero-copy transformations of Imprint records.
+ * Provides a framework for lazy, (eventual) zero-copy transformations of Imprint records.
  * <p>
  * Operations like {@link #project(int...)} and {@link #mergeWith(ImprintRecord)} are
  * intermediate and do not create new records. They build up a plan of operations
@@ -49,11 +54,11 @@ public final class ImprintStream {
      */
     private static final class ProjectPlan implements Plan {
         final Plan previous;
-        final IntSet fieldIds;
+        final Set<Integer> fieldIds;
 
         private ProjectPlan(Plan previous, int... fieldIds) {
             this.previous = Objects.requireNonNull(previous);
-            this.fieldIds = new IntOpenHashSet();
+            this.fieldIds = new HashSet<>();
             for (int id : fieldIds) {
                 this.fieldIds.add(id);
             }
@@ -135,56 +140,42 @@ public final class ImprintStream {
         }
 
         public ImprintRecord execute() {
-            // Unwind the plan's linked-list structure into a forward-order list of operations.
-            var planList = getPlans();
-            Collections.reverse(planList);
+            // Unwind the plan from a deque
+            var planQueue = getPlans();
 
-            // This map holds the set of fields being built, sorted by field ID.
-            var resolvedFields = new Int2ObjectAVLTreeMap<FieldSource>();
+            // Set of fields being built
+            var resolvedFields = new TreeMap<Integer, FieldSource>();
 
-            // Iteratively evaluate the plan step-by-step.
-            for (var planStep : planList) {
+            for (var planStep : planQueue) {
                 if (planStep instanceof SourcePlan) {
                     var sourcePlan = (SourcePlan) planStep;
                     for (var entry : sourcePlan.source.getDirectory()) {
-                        resolvedFields.put(entry.getId(), new FieldSource(sourcePlan.source, entry));
+                        resolvedFields.put((int) entry.getId(), new FieldSource(sourcePlan.source, entry));
                     }
                 } else if (planStep instanceof ProjectPlan) {
                     var projectPlan = (ProjectPlan) planStep;
                     // Apply projection to the current state of resolved fields.
                     // Keep only fields that are in the projection set
-                    var keysToRemove = new IntOpenHashSet();
-                    for (int fieldId : resolvedFields.keySet()) {
-                        if (!projectPlan.fieldIds.contains(fieldId)) {
-                            keysToRemove.add(fieldId);
-                        }
-                    }
-                    for (int keyToRemove : keysToRemove) {
-                        resolvedFields.remove(keyToRemove);
-                    }
+                    resolvedFields.keySet().removeIf(fieldId -> !projectPlan.fieldIds.contains(fieldId));
                 } else if (planStep instanceof MergePlan) {
                     var mergePlan = (MergePlan) planStep;
                     // Add fields from other records if they aren't already in the map.
                     for (var otherRecord : mergePlan.others) {
                         for (var entry : otherRecord.getDirectory()) {
                             int fieldId = entry.getId();
-                            if (!resolvedFields.containsKey(fieldId)) {
-                                resolvedFields.put(fieldId, new FieldSource(otherRecord, entry));
-                            }
+                            resolvedFields.putIfAbsent(fieldId, new FieldSource(otherRecord, entry));
                         }
                     }
                 }
             }
-
-            // Once the final field set is determined, build the record.
             return build(resolvedFields);
         }
 
-        private ArrayList<Plan> getPlans() {
-            var planList = new ArrayList<Plan>();
+        private Deque<Plan> getPlans() {
+            var planQueue = new ArrayDeque<Plan>();
             var current = plan;
             while (current != null) {
-                planList.add(current);
+                planQueue.addFirst(current);
                 if (current instanceof ProjectPlan) {
                     current = ((ProjectPlan) current).previous;
                 } else if (current instanceof MergePlan) {
@@ -193,38 +184,34 @@ public final class ImprintStream {
                     current = null; // End of the chain
                 }
             }
-            return planList;
+            return planQueue;
         }
 
-        private ImprintRecord build(Int2ObjectSortedMap<FieldSource> finalFields) {
+        private ImprintRecord build(NavigableMap<Integer, FieldSource> finalFields) {
             if (finalFields.isEmpty()) {
-                // To-Do: Need a way to get the schemaId for an empty record.
+                // TODO: Need a way to get the schemaId for an empty record.
                 // For now, returning null or using a default.
                 try {
                     return ImprintRecord.builder(new SchemaId(0, 0)).build();
                 } catch (ImprintException e) {
-                    // This should not happen when building an empty record.
+                    // TODO This shouldn't really ever happen, we probably need a better way of consolidating error handling
                     throw new IllegalStateException("Failed to build empty record.", e);
                 }
             }
 
-            // Determine the schema from the first field's source record.
-            SchemaId schemaId = finalFields.get(finalFields.firstIntKey()).record.getHeader().getSchemaId();
+            // Use schema from the first field's source record.
+            var schemaId = finalFields.firstEntry().getValue().record.getHeader().getSchemaId();
 
             // 1. Calculate final payload size and prepare directory.
             int payloadSize = 0;
-            var newDirectoryMap = new Int2ObjectAVLTreeMap<DirectoryEntry>();
+            var newDirectoryMap = new TreeMap<Integer, Directory>();
 
-            // Iterate over fields in sorted order
-            for (var entry : finalFields.int2ObjectEntrySet()) {
-                int fieldId = entry.getIntKey();
+            for (var entry : finalFields.entrySet()) {
+                int fieldId = entry.getKey();
                 var fieldSource = entry.getValue();
                 int fieldLength = fieldSource.getLength();
 
-                newDirectoryMap.put(fieldId, new SimpleDirectoryEntry(
-                        fieldSource.entry.getId(),
-                        fieldSource.entry.getTypeCode(),
-                        payloadSize));
+                newDirectoryMap.put(fieldId, new Directory.Entry(fieldSource.entry.getId(), fieldSource.entry.getTypeCode(), payloadSize));
                 payloadSize += fieldLength;
             }
 
@@ -232,12 +219,11 @@ public final class ImprintStream {
             var payload = ByteBuffer.allocate(payloadSize).order(ByteOrder.LITTLE_ENDIAN);
             for (var fieldSource : finalFields.values()) {
                 try {
-                    ByteBuffer sourceData = fieldSource.record.getRawBytes(fieldSource.entry.getId());
-                    if (sourceData != null) {
+                    var sourceData = fieldSource.record.getRawBytes(fieldSource.entry.getId());
+                    if (sourceData != null)
                         payload.put(sourceData.duplicate());
-                    }
                 } catch (Exception e) {
-                    // This indicates a data corruption or bug, shouldn't happen in normal operation.
+                    // Shouldn't happen in normal operation - maybe some sort of data corruption or race issue
                     throw new IllegalStateException("Failed to copy data for field " + fieldSource.entry.getId(), e);
                 }
             }
@@ -249,20 +235,20 @@ public final class ImprintStream {
         }
 
         /**
-         * A helper class to track the source record and directory entry for a field.
+         * A lightweight struct to track the source of a field during evaluation.
          */
         private static final class FieldSource {
             final ImprintRecord record;
-            final DirectoryEntry entry;
+            final Directory entry;
 
-            FieldSource(ImprintRecord record, DirectoryEntry entry) {
+            FieldSource(ImprintRecord record, Directory entry) {
                 this.record = record;
                 this.entry = entry;
             }
 
             int getLength() {
                 try {
-                    ByteBuffer buf = record.getRawBytes(entry.getId());
+                    var buf = record.getRawBytes(entry.getId());
                     return buf != null ? buf.remaining() : 0;
                 } catch (Exception e) {
                     return 0;

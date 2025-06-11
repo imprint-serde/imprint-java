@@ -1,24 +1,23 @@
 package com.imprint.benchmark.competitors;
 
 import com.imprint.benchmark.DataGenerator;
-import com.imprint.core.ImprintOperations;
+import com.imprint.ops.ImprintOperations;
 import com.imprint.core.ImprintRecord;
 import com.imprint.core.ImprintRecordBuilder;
 import com.imprint.core.SchemaId;
 import com.imprint.error.ImprintException;
-import lombok.SneakyThrows;
 import org.openjdk.jmh.infra.Blackhole;
 
 import java.nio.ByteBuffer;
 
-public class ImprintCompetitor extends AbstractCompetitor {
+public class ImprintSerializingBenchmark extends AbstractSerializingBenchmark {
 
     private ImprintRecord imprintRecord1;
     private byte[] serializedRecord1;
     private byte[] serializedRecord2;
     private static final SchemaId SCHEMA_ID = new SchemaId(1, 1);
 
-    public ImprintCompetitor() {
+    public ImprintSerializingBenchmark() {
         super("Imprint");
     }
 

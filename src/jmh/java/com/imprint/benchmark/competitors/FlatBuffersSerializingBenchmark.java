@@ -6,14 +6,13 @@ import com.imprint.benchmark.flatbuffers.TestRecord;
 import org.openjdk.jmh.infra.Blackhole;
 
 import java.nio.ByteBuffer;
-import java.util.stream.Collectors;
 
-public class FlatBuffersCompetitor extends AbstractCompetitor {
+public class FlatBuffersSerializingBenchmark extends AbstractSerializingBenchmark {
 
     private ByteBuffer serializedRecord1;
     private ByteBuffer serializedRecord2;
 
-    public FlatBuffersCompetitor() {
+    public FlatBuffersSerializingBenchmark() {
         super("FlatBuffers");
     }
 

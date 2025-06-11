@@ -11,13 +11,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 
-public class KryoCompetitor extends AbstractCompetitor {
+public class KryoSerializingBenchmark extends AbstractSerializingBenchmark {
 
     private final Kryo kryo;
     private byte[] serializedRecord1;
     private byte[] serializedRecord2;
 
-    public KryoCompetitor() {
+    public KryoSerializingBenchmark() {
         super("Kryo");
         this.kryo = new Kryo();
         this.kryo.register(DataGenerator.TestRecord.class);

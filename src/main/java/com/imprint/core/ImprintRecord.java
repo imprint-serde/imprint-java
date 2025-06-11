@@ -1,22 +1,20 @@
 package com.imprint.core;
 
 import com.imprint.Constants;
+import com.imprint.ops.ImprintOperations;
 import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import com.imprint.types.MapKey;
 import com.imprint.types.TypeCode;
 import com.imprint.types.Value;
 import com.imprint.util.VarInt;
-import it.unimi.dsi.fastutil.ints.Int2ObjectSortedMap;
 import lombok.Getter;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.TreeMap;
 
 /**
  * An Imprint record containing a header and buffer management.
@@ -38,7 +36,7 @@ public final class ImprintRecord {
     /**
      * Creates a record from a pre-sorted list of entries (most efficient builder path).
      */
-    ImprintRecord(Header header, List<? extends DirectoryEntry> sortedDirectory, ByteBuffer payload) {
+    public ImprintRecord(Header header, List<? extends Directory> sortedDirectory, ByteBuffer payload) {
         this.header = Objects.requireNonNull(header, "Header cannot be null");
         this.buffers = new ImprintBuffers(sortedDirectory, payload);
     }
@@ -46,7 +44,7 @@ public final class ImprintRecord {
     /**
      * Creates a record from a pre-built and sorted FastUtil map (most efficient builder path).
      */
-    ImprintRecord(Header header, Int2ObjectSortedMap<? extends DirectoryEntry> parsedDirectory, ByteBuffer payload) {
+    public ImprintRecord(Header header, Map<Integer, ? extends Directory> parsedDirectory, ByteBuffer payload) {
         this.header = Objects.requireNonNull(header, "Header cannot be null");
         this.buffers = new ImprintBuffers(parsedDirectory, payload);
     }
@@ -84,7 +82,7 @@ public final class ImprintRecord {
      * Get raw bytes for a field using a pre-fetched DirectoryEntry.
      * This avoids the cost of re-finding the entry metadata.
      */
-    public ByteBuffer getRawBytes(DirectoryEntry entry) {
+    public ByteBuffer getRawBytes(Directory entry) {
         try {
             return buffers.getFieldBuffer(entry);
         } catch (ImprintException e) {
@@ -117,7 +115,7 @@ public final class ImprintRecord {
     /**
      * Get the directory (parsing it if necessary).
      */
-    public List<DirectoryEntry> getDirectory() {
+    public List<Directory> getDirectory() {
         return buffers.getDirectory();
     }
 
@@ -128,7 +126,7 @@ public final class ImprintRecord {
      * @param fieldId The ID of the field to find.
      * @return The DirectoryEntry if found, otherwise null.
      */
-    public DirectoryEntry getDirectoryEntry(int fieldId) {
+    public Directory getDirectoryEntry(int fieldId) {
         try {
             return buffers.findDirectoryEntry(fieldId);
         } catch (ImprintException e) {
@@ -220,7 +218,7 @@ public final class ImprintRecord {
         // Assemble the final record from existing components
         serializeHeader(this.header, finalBuffer);
         finalBuffer.put(directoryBuffer);
-        finalBuffer.put(payloadBuffer.duplicate()); // Use duplicate to preserve original buffer state
+        finalBuffer.put(payloadBuffer.duplicate());
 
         finalBuffer.flip();
         return finalBuffer.asReadOnlyBuffer();
@@ -236,95 +234,16 @@ public final class ImprintRecord {
     /**
      * Serializes the components of a record into a single ByteBuffer.
      * This provides a direct serialization path without needing a live ImprintRecord instance.
-     *
-     * @param schemaId  The schema identifier for the record.
-     * @param directory The list of directory entries, which will be sorted if not already.
-     * @param payload   The ByteBuffer containing all field data concatenated.
-     * @return A read-only ByteBuffer with the complete serialized record.
-     */
-    public static ByteBuffer serialize(SchemaId schemaId, Collection<? extends DirectoryEntry> directory, ByteBuffer payload) {
-        var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
-        var directoryBuffer = ImprintBuffers.createDirectoryBuffer(directory);
-
-        int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
-        var finalBuffer = ByteBuffer.allocate(finalSize);
-        finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
-
-        // Assemble the final record
-        serializeHeader(header, finalBuffer);
-        finalBuffer.put(directoryBuffer);
-        finalBuffer.put(payload);
-
-        finalBuffer.flip();
-        return finalBuffer.asReadOnlyBuffer();
-    }
-
-    /**
-     * Serializes the components of a record into a single ByteBuffer.
-     * This provides a direct serialization path without needing a live ImprintRecord instance.
-     * This is an optimized version that assumes the list is pre-sorted by field ID.
+     * This assumes the list is pre-sorted by field ID.
      *
      * @param schemaId  The schema identifier for the record.
      * @param sortedDirectory The list of directory entries, which MUST be sorted by field ID.
      * @param payload   The ByteBuffer containing all field data concatenated.
      * @return A read-only ByteBuffer with the complete serialized record.
      */
-    public static ByteBuffer serialize(SchemaId schemaId, List<? extends DirectoryEntry> sortedDirectory, ByteBuffer payload) {
+    public static ByteBuffer serialize(SchemaId schemaId, List<? extends Directory> sortedDirectory, ByteBuffer payload) {
         var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
-        // This createDirectoryBuffer is optimized for a pre-sorted list.
         var directoryBuffer = ImprintBuffers.createDirectoryBuffer(sortedDirectory);
-
-        int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
-        var finalBuffer = ByteBuffer.allocate(finalSize);
-        finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
-
-        // Assemble the final record
-        serializeHeader(header, finalBuffer);
-        finalBuffer.put(directoryBuffer);
-        finalBuffer.put(payload);
-
-        finalBuffer.flip();
-        return finalBuffer.asReadOnlyBuffer();
-    }
-
-    /**
-     * Serializes the components of a record into a single ByteBuffer using a pre-built directory map.
-     * This provides a direct serialization path without needing a live ImprintRecord instance.
-     *
-     * @param schemaId     The schema identifier for the record.
-     * @param directoryMap The map of directory entries, which must be sorted by field ID (e.g., a TreeMap).
-     * @param payload      The ByteBuffer containing all field data concatenated.
-     * @return A read-only ByteBuffer with the complete serialized record.
-     */
-    public static ByteBuffer serialize(SchemaId schemaId, TreeMap<Integer, ? extends DirectoryEntry> directoryMap, ByteBuffer payload) {
-        var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
-        var directoryBuffer = ImprintBuffers.createDirectoryBufferFromMap(directoryMap);
-
-        int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
-        var finalBuffer = ByteBuffer.allocate(finalSize);
-        finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
-
-        // Assemble the final record
-        serializeHeader(header, finalBuffer);
-        finalBuffer.put(directoryBuffer);
-        finalBuffer.put(payload);
-
-        finalBuffer.flip();
-        return finalBuffer.asReadOnlyBuffer();
-    }
-
-    /**
-     * Serializes the components of a record into a single ByteBuffer using a pre-built sorted map.
-     * This is the most efficient path for "write-only" scenarios, used by the builder.
-     *
-     * @param schemaId     The schema identifier for the record.
-     * @param directoryMap The sorted map of directory entries.
-     * @param payload      The ByteBuffer containing all field data concatenated.
-     * @return A read-only ByteBuffer with the complete serialized record.
-     */
-    public static ByteBuffer serialize(SchemaId schemaId, Int2ObjectSortedMap<? extends DirectoryEntry> directoryMap, ByteBuffer payload) {
-        var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
-        var directoryBuffer = ImprintBuffers.createDirectoryBufferFromSortedMap(directoryMap);
 
         int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
         var finalBuffer = ByteBuffer.allocate(finalSize);

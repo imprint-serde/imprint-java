@@ -285,7 +285,7 @@ public abstract class Value {
     public static class StringValue extends Value {
         @Getter
         private final String value;
-        private byte[] utf8BytesCache; // Cache UTF-8 encoding
+        private byte[] utf8BytesCache;
         
         public StringValue(String value) {
             this.value = Objects.requireNonNull(value, "String cannot be null");

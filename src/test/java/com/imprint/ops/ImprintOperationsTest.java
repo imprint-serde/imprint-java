@@ -1,5 +1,8 @@
-package com.imprint.core;
+package com.imprint.ops;
 
+import com.imprint.core.Directory;
+import com.imprint.core.ImprintRecord;
+import com.imprint.core.SchemaId;
 import com.imprint.error.ImprintException;
 import com.imprint.types.Value;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,7 +75,7 @@ class ImprintOperationsTest {
             assertArrayEquals(new byte[]{1, 2, 3}, projected.getBytes(7));
 
             // And directory should maintain sorted order
-            List<DirectoryEntry> directory = projected.getDirectory();
+            List<Directory> directory = projected.getDirectory();
             for (int i = 1; i < directory.size(); i++) {
                 assertTrue(directory.get(i - 1).getId() < directory.get(i).getId(),
                         "Directory entries should be sorted by field id");
@@ -95,7 +98,7 @@ class ImprintOperationsTest {
         void shouldPreserveAllFieldsWhenProjectingAll() throws ImprintException {
             // Given all field IDs from the original record
             int[] allFields = multiFieldRecord.getDirectory().stream()
-                    .mapToInt(DirectoryEntry::getId)
+                    .mapToInt(Directory::getId)
                     .toArray();
 
             // When projecting all fields
@@ -104,7 +107,7 @@ class ImprintOperationsTest {
             // Then all fields should be present with matching values
             assertEquals(multiFieldRecord.getDirectory().size(), projected.getDirectory().size());
 
-            for (DirectoryEntry entry : multiFieldRecord.getDirectory()) {
+            for (Directory entry : multiFieldRecord.getDirectory()) {
                 Value originalValue = multiFieldRecord.getValue(entry.getId());
                 Value projectedValue = projected.getValue(entry.getId());
                 assertEquals(originalValue, projectedValue,
@@ -228,7 +231,7 @@ class ImprintOperationsTest {
             assertEquals(123L, merged.getInt64(4));
 
             // And directory should be sorted
-            List<DirectoryEntry> directory = merged.getDirectory();
+            List<Directory> directory = merged.getDirectory();
             for (int i = 1; i < directory.size(); i++) {
                 assertTrue(directory.get(i - 1).getId() < directory.get(i).getId(),
                         "Directory entries should be sorted by field id");
@@ -293,7 +296,7 @@ class ImprintOperationsTest {
             assertEquals(multiFieldRecord.getDirectory().size(), merged2.getDirectory().size());
 
             // And values should be preserved
-            for (DirectoryEntry entry : multiFieldRecord.getDirectory()) {
+            for (Directory entry : multiFieldRecord.getDirectory()) {
                 Value originalValue = multiFieldRecord.getValue(entry.getId());
                 assertEquals(originalValue, merged1.getValue(entry.getId()));
                 assertEquals(originalValue, merged2.getValue(entry.getId()));
@@ -335,9 +338,9 @@ class ImprintOperationsTest {
             assertArrayEquals(new byte[]{1, 2, 3, 4, 5}, merged.getBytes(4));
 
             // And directory offsets should be sequential
-            List<DirectoryEntry> directory = merged.getDirectory();
+            List<Directory> directory = merged.getDirectory();
             int expectedOffset = 0;
-            for (DirectoryEntry entry : directory) {
+            for (Directory entry : directory) {
                 assertEquals(expectedOffset, entry.getOffset(),
                         "Field " + entry.getId() + " should have correct offset");
 
@@ -359,6 +362,7 @@ class ImprintOperationsTest {
             for (int i = 1; i <= 100; i++) {
                 builder1.field(i, i * 10);
             }
+
             for (int i = 101; i <= 200; i++) {
                 builder2.field(i, i * 10);
             }
@@ -372,7 +376,7 @@ class ImprintOperationsTest {
             // Then all 200 fields should be present and accessible
             assertEquals(200, merged.getDirectory().size());
 
-            // Spot check some values
+            // Spot check a bunch of random values just to make sure I guess
             assertEquals(10, merged.getInt32(1));
             assertEquals(500, merged.getInt32(50));
             assertEquals(1000, merged.getInt32(100));
