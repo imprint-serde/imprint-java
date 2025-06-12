@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.Value;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -28,6 +29,38 @@ public interface Directory {
     int getOffset();
 
     /**
+     * A view interface for accessing directory entries efficiently.
+     * Provides both access to individual entries and full directory materialization.
+     */
+    interface DirectoryView {
+        /**
+         * Find a directory entry by field ID.
+         * @param fieldId The field ID to search for
+         * @return The directory entry if found, null otherwise
+         */
+        Directory findEntry(int fieldId);
+
+        /**
+         * Get all directory entries as a list, with full eager deserialization if necessary.
+         * @return List of all directory entries in field ID order
+         */
+        List<Directory> toList();
+
+        /**
+         * Get the count of directory entries without parsing all entries.
+         * @return Number of entries in the directory
+         */
+        int size();
+
+        /**
+         * Create an iterator for lazy directory traversal.
+         * For buffer-backed views, this avoids parsing the entire directory upfront.
+         * @return Iterator over directory entries in field ID order
+         */
+        java.util.Iterator<Directory> iterator();
+    }
+
+    /**
      * Immutable representation of the Imprint Directory used for deserialization,
      * merging, and field projections
      */
@@ -41,29 +74,6 @@ public interface Directory {
             this.id = id;
             this.typeCode = Objects.requireNonNull(typeCode, "TypeCode cannot be null");
             this.offset = offset;
-        }
-    }
-
-    /**
-     * Mutable representation of the Imprint Directory bound with corresponding type value
-     * used for record building through {@link ImprintRecordBuilder} and subsequent serialization.
-     */
-    @Getter
-    class Builder implements Directory {
-        private final short id;
-        private final com.imprint.types.Value value;
-        @Setter
-        private int offset;
-
-        Builder(short id, com.imprint.types.Value value) {
-            this.id = id;
-            this.value = value;
-            this.offset = -1;
-        }
-
-        @Override
-        public TypeCode getTypeCode() {
-            return value.getTypeCode();
         }
     }
 }

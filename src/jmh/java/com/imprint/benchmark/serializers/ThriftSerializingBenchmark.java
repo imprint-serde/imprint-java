@@ -1,4 +1,4 @@
-package com.imprint.benchmark.competitors;
+package com.imprint.benchmark.serializers;
 
 import com.imprint.benchmark.DataGenerator;
 import com.imprint.benchmark.thrift.ProjectedRecord;

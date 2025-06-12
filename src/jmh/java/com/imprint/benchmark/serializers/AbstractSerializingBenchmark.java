@@ -1,10 +1,10 @@
-package com.imprint.benchmark.competitors;
+package com.imprint.benchmark.serializers;
 
 import com.imprint.benchmark.DataGenerator;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * A minimal base class for competitors, holding the test data.
+ * A minimal base class for serialization frameworks to compare against, holding the test data.
  */
 public abstract class AbstractSerializingBenchmark implements SerializingBenchmark {
 
