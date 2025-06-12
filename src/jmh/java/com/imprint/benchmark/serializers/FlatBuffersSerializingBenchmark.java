@@ -1,4 +1,4 @@
-package com.imprint.benchmark.competitors;
+package com.imprint.benchmark.serializers;
 
 import com.google.flatbuffers.FlatBufferBuilder;
 import com.imprint.benchmark.DataGenerator;
@@ -31,7 +31,6 @@ public class FlatBuffersSerializingBenchmark extends AbstractSerializingBenchmar
         int tagsVectorOffset = TestRecord.createTagsVector(builder, tagsOffsets);
 
         int[] metadataKeysOffsets = pojo.metadata.keySet().stream().mapToInt(builder::createString).toArray();
-        int[] metadataValuesOffsets = pojo.metadata.values().stream().mapToInt(builder::createString).toArray();
         // This is not correct FlatBuffers map creation, it's a placeholder.
         // A proper implementation would require a table for each entry.
         // For this benchmark, we'll just serialize the keys vector.

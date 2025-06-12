@@ -1,10 +1,10 @@
-package com.imprint.benchmark.competitors;
+package com.imprint.benchmark.serializers;
 
 import com.imprint.benchmark.DataGenerator;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Defines the contract for a serialization competitor in the benchmark.
+ * Defines the contract for a serialization framework in the benchmark.
  */
 public interface SerializingBenchmark {
     String name();

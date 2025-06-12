@@ -1,18 +1,19 @@
-package com.imprint.benchmark.competitors;
+package com.imprint.benchmark.serializers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.imprint.benchmark.DataGenerator;
+import org.msgpack.jackson.dataformat.MessagePackFactory;
 import org.openjdk.jmh.infra.Blackhole;
 
-public class JacksonSerializingBenchmark extends AbstractSerializingBenchmark {
+public class MessagePackSerializingBenchmark extends AbstractSerializingBenchmark {
 
     private final ObjectMapper mapper;
     private byte[] serializedRecord;
     private byte[] serializedRecord2;
 
-    public JacksonSerializingBenchmark() {
-        super("Jackson-JSON");
-        this.mapper = new ObjectMapper();
+    public MessagePackSerializingBenchmark() {
+        super("MessagePack");
+        this.mapper = new ObjectMapper(new MessagePackFactory());
     }
 
     @Override
@@ -50,7 +51,6 @@ public class JacksonSerializingBenchmark extends AbstractSerializingBenchmark {
             // Full round trip: deserialize, project to a new object, re-serialize
             var original = mapper.readValue(serializedRecord, DataGenerator.TestRecord.class);
 
-            // Simulate by creating the projected object and serializing it
             var projected = new DataGenerator.ProjectedRecord();
             projected.id = original.id;
             projected.timestamp = original.timestamp;
@@ -67,12 +67,12 @@ public class JacksonSerializingBenchmark extends AbstractSerializingBenchmark {
         try {
             var r1 = mapper.readValue(serializedRecord, DataGenerator.TestRecord.class);
             var r2 = mapper.readValue(serializedRecord2, DataGenerator.TestRecord.class);
-            // Simulate by creating a new merged object and serializing it
+
             var merged = new DataGenerator.TestRecord();
             merged.id = r1.id;
-            merged.timestamp = System.currentTimeMillis(); // new value
+            merged.timestamp = System.currentTimeMillis();
             merged.flags = r1.flags;
-            merged.active = false; // new value
+            merged.active = false;
             merged.value = r1.value;
             merged.data = r1.data;
             merged.tags = r2.tags;

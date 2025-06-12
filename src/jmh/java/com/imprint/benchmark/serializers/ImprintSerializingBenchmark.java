@@ -1,7 +1,6 @@
-package com.imprint.benchmark.competitors;
+package com.imprint.benchmark.serializers;
 
 import com.imprint.benchmark.DataGenerator;
-import com.imprint.ops.ImprintOperations;
 import com.imprint.core.ImprintRecord;
 import com.imprint.core.ImprintRecordBuilder;
 import com.imprint.core.SchemaId;
@@ -53,19 +52,6 @@ public class ImprintSerializingBenchmark extends AbstractSerializingBenchmark {
         return builder.build();
     }
 
-    private ImprintRecordBuilder preBuildRecord(DataGenerator.TestRecord pojo) throws ImprintException {
-        var builder = ImprintRecord.builder(SCHEMA_ID);
-        builder.field(0, pojo.id);
-        builder.field(1, pojo.timestamp);
-        builder.field(2, pojo.flags);
-        builder.field(3, pojo.active);
-        builder.field(4, pojo.value);
-        builder.field(5, pojo.data);
-        builder.field(6, pojo.tags);
-        builder.field(7, pojo.metadata);
-        return builder;
-    }
-
     @Override
     public void serialize(Blackhole bh) {
         try {
@@ -87,8 +73,8 @@ public class ImprintSerializingBenchmark extends AbstractSerializingBenchmark {
     @Override
     public void projectAndSerialize(Blackhole bh) {
         try {
-            ImprintRecord record = ImprintRecord.deserialize(this.serializedRecord1);
-            ImprintRecord projected = record.project(0, 1, 6);
+            // Should use zero-copy projection directly from existing record
+            ImprintRecord projected = this.imprintRecord1.project(0, 1, 6);
             bh.consume(projected.serializeToBuffer());
         } catch (ImprintException e) {
             throw new RuntimeException(e);
@@ -98,9 +84,9 @@ public class ImprintSerializingBenchmark extends AbstractSerializingBenchmark {
     @Override
     public void mergeAndSerialize(Blackhole bh) {
         try {
-            var r1 = ImprintRecord.deserialize(this.serializedRecord1);
+            // Use zero-copy merge - keep one record, deserialize the other
             var r2 = ImprintRecord.deserialize(this.serializedRecord2);
-            var merged = ImprintOperations.merge(r1, r2);
+            var merged = this.imprintRecord1.merge(r2);
             bh.consume(merged.serializeToBuffer());
         } catch (ImprintException e) {
             throw new RuntimeException(e);

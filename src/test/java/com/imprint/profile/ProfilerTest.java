@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import java.util.Random;
 import java.util.stream.IntStream;
 
@@ -38,14 +40,14 @@ public class ProfilerTest {
 
         var record1 = createTestRecord(20);
         var record2 = createTestRecord(20);
-        int iterations = 200_000;
+        int iterations = 500_000;
 
         System.out.printf("Beginning small merge profiling (%,d iterations)...%n", iterations);
         long start = System.nanoTime();
 
         for (int i = 0; i < iterations; i++) {
             // This is the hotspot we want to profile
-            var merged = ImprintOperations.merge(record1, record2);
+            var merged = record1.merge(record2);
 
             // Simulate some usage to prevent dead code elimination
             if (i % 10_000 == 0) {
@@ -68,13 +70,13 @@ public class ProfilerTest {
 
         var record1 = createTestRecord(100);
         var record2 = createTestRecord(100);
-        int iterations = 50_000;
+        int iterations = 100_000;
 
         System.out.printf("Beginning large merge profiling (%,d iterations)...%n", iterations);
         long start = System.nanoTime();
 
         for (int i = 0; i < iterations; i++) {
-            var merged = ImprintOperations.merge(record1, record2);
+            var merged = record1.merge(record2);
             merged.serializeToBuffer();
         }
 
@@ -91,13 +93,13 @@ public class ProfilerTest {
 
         var record1 = createTestRecordWithFieldIds(new int[]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15});
         var record2 = createTestRecordWithFieldIds(new int[]{10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24});
-        int iterations = 100_000;
+        int iterations = 200_000;
 
         System.out.printf("Beginning overlapping merge profiling (%,d iterations)...%n", iterations);
         long start = System.nanoTime();
 
         for (int i = 0; i < iterations; i++) {
-            var merged = ImprintOperations.merge(record1, record2);
+            var merged = record1.merge(record2);
             merged.serializeToBuffer();
         }
 
@@ -115,13 +117,13 @@ public class ProfilerTest {
         // Create records with completely separate field IDs
         var record1 = createTestRecordWithFieldIds(new int[]{1, 3, 5, 7, 9, 11, 13, 15, 17, 19});
         var record2 = createTestRecordWithFieldIds(new int[]{2, 4, 6, 8, 10, 12, 14, 16, 18, 20});
-        int iterations = 100_000;
+        int iterations = 200_000;
 
         System.out.printf("Beginning disjoint merge profiling (%,d iterations)...%n", iterations);
         long start = System.nanoTime();
 
         for (int i = 0; i < iterations; i++) {
-            var merged = ImprintOperations.merge(record1, record2);
+            var merged = record1.merge(record2);
             merged.serializeToBuffer();
         }
 
@@ -140,6 +142,10 @@ public class ProfilerTest {
     @Test
     @Tag("serialization")
     @Tag("large-records")
+        /*
+        It's usually better to change DEFAULT_CAPACITY in ImprintFieldObjectMap to ensure resizing doesn't happen
+        unless you specifically want to profile resizing costs (should happen rarely in reality).
+        */
     void profileLargeRecordSerialization() throws Exception {
         profileSerialization("large records", LARGE_RECORD_SIZE, 500_000);
     }
@@ -147,47 +153,10 @@ public class ProfilerTest {
     @Test
     @Tag("projection")
     void profileProjectionOperations() throws Exception {
-        System.out.println("Starting projection profiler test - attach profiler now...");
         Thread.sleep(3000);
         profileSmallProjections();
         profileLargeProjections();
         profileSelectiveProjections();
-    }
-
-    @Test
-    @Tag("memory")
-    @Tag("allocation")
-    void profileMemoryAllocation() throws Exception {
-        System.out.println("Starting allocation profiler test...");
-        Thread.sleep(3000);
-
-        System.out.println("Beginning allocation profiling - watch for GC events...");
-
-        // Force allocation pressure to reveal GC hotspots
-        for (int batch = 0; batch < 1000; batch++) {
-            for (int i = 0; i < 1000; i++) {
-                var schemaId = new SchemaId(batch, i);
-                var builder = ImprintRecord.builder(schemaId);
-
-                // Create strings of varying sizes (allocation pressure)
-                builder.field(1, Value.fromString("small"))
-                        .field(2, Value.fromString("medium-length-string-" + i))
-                        .field(3, Value.fromString("very-long-string-that-will-cause-more-allocation-pressure-" + batch + "-" + i))
-                        .field(4, Value.fromBytes(new byte[100 + i % 1000])); // Varying byte arrays
-
-                var record = builder.build();
-
-                // Some deserialization to trigger string decoding allocations
-                record.getValue(2);
-                record.getValue(3);
-            }
-
-            if (batch % 100 == 0) {
-                System.out.printf("Completed batch %d/1000%n", batch);
-            }
-        }
-
-        System.out.println("Allocation test complete - check GC logs and memory profiler");
     }
 
     // Rest of the methods remain the same...
@@ -203,7 +172,7 @@ public class ProfilerTest {
 
         for (int i = 0; i < iterations; i++) {
             // This is the hotspot we want to profile
-            var projected = ImprintOperations.project(sourceRecord, projectFields);
+            var projected = sourceRecord.project(projectFields);
 
             // Simulate some usage to prevent dead code elimination
             if (i % 10_000 == 0) {
@@ -226,14 +195,14 @@ public class ProfilerTest {
         int[] projectFields = IntStream.range(0, 50)
                 .map(i -> (i * 4) + 1)
                 .toArray();
-        int iterations = 50_000;
+        int iterations = 200_000;
 
         System.out.printf("Beginning large projection profiling (%,d iterations, %d->%d fields)...%n",
                 iterations, 200, projectFields.length);
         long start = System.nanoTime();
 
         for (int i = 0; i < iterations; i++) {
-            var projected = ImprintOperations.project(sourceRecord, projectFields);
+            var projected = sourceRecord.project(projectFields);
 
             // Periodically access some fields to simulate real usage
             if (i % 1_000 == 0) {
@@ -254,7 +223,7 @@ public class ProfilerTest {
 
         var sourceRecord = createTestRecord(100);
         Random random = new Random(42);
-        int iterations = 100_000;
+        int iterations = 200_000;
 
         // Test different projection patterns
         var patterns = new ProjectionPattern[]{
@@ -271,7 +240,7 @@ public class ProfilerTest {
             long start = System.nanoTime();
 
             for (int i = 0; i < iterations; i++) {
-                var projected = ImprintOperations.project(sourceRecord, pattern.fields);
+                var projected = sourceRecord.project(pattern.fields);
 
                 // Simulate field access
                 if (i % 5_000 == 0) {
@@ -409,5 +378,60 @@ public class ProfilerTest {
                 .distinct()
                 .sorted()
                 .toArray();
+    }
+
+    @Test
+    @Tag("profiling")
+    void profileBytesToBytesVsObjectMerge() throws Exception {
+        System.out.println("=== Bytes-to-Bytes vs Object Merge Comparison ===");
+        
+        // Create test records
+        var record1 = createTestRecordWithFieldIds(new int[]{1, 3, 5, 7, 9, 11, 13, 15});
+        var record2 = createTestRecordWithFieldIds(new int[]{2, 4, 6, 8, 10, 12, 14, 16});
+        
+        var record1Bytes = record1.serializeToBuffer();
+        var record2Bytes = record2.serializeToBuffer();
+        
+        int iterations = 50_000;
+        
+        // Warm up
+        for (int i = 0; i < 1000; i++) {
+            record1.merge(record2).serializeToBuffer();
+            ImprintOperations.mergeBytes(record1Bytes, record2Bytes);
+        }
+        
+        System.out.printf("Profiling %,d merge operations...%n", iterations);
+        
+        // Test object merge + serialize
+        long startObjectMerge = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            var merged = record1.merge(record2);
+            var serialized = merged.serializeToBuffer();
+            // Consume result to prevent optimization
+            if (serialized.remaining() == 0) throw new RuntimeException("Empty result");
+        }
+        long objectMergeTime = System.nanoTime() - startObjectMerge;
+        
+        // Test bytes merge
+        long startBytesMerge = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            var merged = ImprintOperations.mergeBytes(record1Bytes, record2Bytes);
+            // Consume result to prevent optimization
+            if (merged.remaining() == 0) throw new RuntimeException("Empty result");
+        }
+        long bytesMergeTime = System.nanoTime() - startBytesMerge;
+        
+        double objectAvg = (double) objectMergeTime / iterations / 1000.0; // microseconds
+        double bytesAvg = (double) bytesMergeTime / iterations / 1000.0;   // microseconds
+        double speedup = objectAvg / bytesAvg;
+        
+        System.out.printf("Object merge + serialize: %.2f ms (avg: %.1f μs/op)%n", 
+                objectMergeTime / 1_000_000.0, objectAvg);
+        System.out.printf("Bytes-to-bytes merge:     %.2f ms (avg: %.1f μs/op)%n", 
+                bytesMergeTime / 1_000_000.0, bytesAvg);
+        System.out.printf("Speedup: %.1fx faster%n", speedup);
+        
+        // Assert that bytes approach is faster (should be at least 1.5x)
+        assertTrue(speedup > 1.0, String.format("Bytes merge should be faster. Got %.1fx speedup", speedup));
     }
 }

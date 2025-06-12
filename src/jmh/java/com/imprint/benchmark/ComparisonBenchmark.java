@@ -1,7 +1,7 @@
 package com.imprint.benchmark;
 
-import com.imprint.benchmark.competitors.*;
-import com.imprint.benchmark.competitors.SerializingBenchmark;
+import com.imprint.benchmark.serializers.*;
+import com.imprint.benchmark.serializers.SerializingBenchmark;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 import org.openjdk.jmh.runner.Runner;
@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
 @Warmup(iterations = 3, time = 1)
-@Measurement(iterations = 10, time = 1)
+@Measurement(iterations = 7, time = 1)
 @Fork(value = 1, jvmArgs = {"-Xms4g", "-Xmx4g"})
 public class ComparisonBenchmark {
 
@@ -28,10 +28,9 @@ public class ComparisonBenchmark {
             new AvroSerializingBenchmark(),
             new ThriftSerializingBenchmark(),
             new KryoSerializingBenchmark(),
-            new MessagePackSerializingBenchmark()
-    );
+            new MessagePackSerializingBenchmark());
 
-    @Param({"Imprint", "Jackson-JSON", "Protobuf", "FlatBuffers", "Avro-Generic", "Thrift", "Kryo", "MessagePack"})
+    @Param({"Imprint", "Jackson-JSON", "Protobuf", "FlatBuffers", "Avro-Generic", "Thrift", "Kryo", "MessagePack", "CapnProto"})
     public String framework;
 
     private SerializingBenchmark serializingBenchmark;
@@ -47,7 +46,7 @@ public class ComparisonBenchmark {
         DataGenerator.TestRecord testRecord1 = DataGenerator.createTestRecord();
         DataGenerator.TestRecord testRecord2 = DataGenerator.createTestRecord();
 
-        // Setup the competitor with the data
+        // Setup the framework with the data
         serializingBenchmark.setup(testRecord1, testRecord2);
     }
 
@@ -56,7 +55,7 @@ public class ComparisonBenchmark {
         serializingBenchmark.serialize(bh);
     }
 
-    @Benchmark
+    //@Benchmark
     public void deserialize(Blackhole bh) {
         serializingBenchmark.deserialize(bh);
     }
@@ -71,7 +70,7 @@ public class ComparisonBenchmark {
         serializingBenchmark.mergeAndSerialize(bh);
     }
 
-    @Benchmark
+    //@Benchmark
     public void accessField(Blackhole bh) {
         serializingBenchmark.accessField(bh);
     }
