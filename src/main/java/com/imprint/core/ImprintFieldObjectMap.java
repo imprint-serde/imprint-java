@@ -119,7 +119,7 @@ final class ImprintFieldObjectMap<T> {
     }
     
     /**
-     * Result holder for in-place sorted values - avoids allocation by returning 
+     * Result holder for in-place sorted values - avoids Array.copy allocations by returning
      * array reference and valid count.
      */
     public static final class SortedValuesResult {
@@ -216,7 +216,7 @@ final class ImprintFieldObjectMap<T> {
     }
     
     /**
-     * Compact all non-empty entries to the front of keys/values arrays.
+     * Left side compact for all non-empty entries to the front of keys/values arrays.
      */
     private void compactEntries() {
         int writeIndex = 0;
@@ -237,7 +237,7 @@ final class ImprintFieldObjectMap<T> {
     }
     
     /**
-     * Sort the first 'count' entries by key using insertion sort (should be fast for small arrays).
+     * Sort the first 'count' entries by key using insertion sort (should be fast enough for small arrays).
      */
     private void sortEntriesByKey(int count) {
         for (int i = 1; i < count; i++) {
@@ -281,8 +281,7 @@ final class ImprintFieldObjectMap<T> {
         
         int oldSize = size;
         size = 0;
-        
-        // Rehash all entries
+
         for (int i = 0; i < oldKeys.length; i++) {
             if (oldKeys[i] != EMPTY_KEY) {
                 @SuppressWarnings("unchecked")
@@ -290,14 +289,12 @@ final class ImprintFieldObjectMap<T> {
                 put(oldKeys[i], value);
             }
         }
-        
-        // Verify size didn't change during rehash
+        //TODO remove this assertion (carried from from EclipseCollection)
         assert size == oldSize;
     }
 
     private static int hash(short key) {
-        // Simple but effective hash for short keys
-        int intKey = key & 0xFFFF; // Convert to unsigned int
+        int intKey = key & 0xFFFF;
         intKey ^= intKey >>> 8;
         return intKey;
     }

@@ -27,8 +27,9 @@ public class ImprintOperations {
     public static ByteBuffer mergeBytes(ByteBuffer firstBuffer, ByteBuffer secondBuffer) throws ImprintException {
         validateImprintBuffer(firstBuffer, "firstBuffer");
         validateImprintBuffer(secondBuffer, "secondBuffer");
-        
-        // Work on duplicates to avoid affecting original positions
+
+        // TODO possible could work directly on the originals but duplicate makes the mark values and offsets easy to reason about
+        // duplicates to avoid affecting original positions, we'll need to preserve at least one side
         var first = firstBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
         var second = secondBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
         
@@ -60,6 +61,7 @@ public class ImprintOperations {
     
     /**
      * Merge raw directory and payload sections without object creation
+     * Assumes incoming streams are already both sorted from the serialization process
      */
     private static ByteBuffer mergeRawSections(Header firstHeader, ImprintRecord.BufferSections firstSections, ImprintRecord.BufferSections secondSections) throws ImprintException {
         // Prepare directory iterators
@@ -142,12 +144,11 @@ public class ImprintOperations {
         if (fieldIds == null || fieldIds.length == 0) {
             return createEmptyRecordBytes();
         }
-        
-        // Sort field IDs for efficient merge algorithm (duplicates handled naturally)
+
         var sortedFieldIds = fieldIds.clone();
         Arrays.sort(sortedFieldIds);
         
-        // Work on duplicate to avoid affecting original position
+        // Duplicate avoids affecting original position which we'll need later
         var source = sourceBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
         
         // Parse header
@@ -162,7 +163,6 @@ public class ImprintOperations {
 
     /**
      * Project raw sections without object creation using optimized merge algorithm.
-     * Uses direct array operations and optimized memory access for maximum performance.
      */
     private static ByteBuffer projectRawSections(Header originalHeader, ImprintRecord.BufferSections sections, int[] sortedRequestedFields) throws ImprintException {
         
@@ -194,14 +194,14 @@ public class ImprintOperations {
                 // Add to projection with adjusted offset
                 projectedEntries.add(new RawDirectoryEntry(currentEntry.fieldId, currentEntry.typeCode, currentOffset));
                 
-                // Collect payload chunk here (fieldPayload is already sliced)
+                // Collect payload chunk here  - fieldPayload should already sliced
                 payloadChunks.add(fieldPayload);
                 
                 int payloadSize = fieldPayload.remaining();
                 currentOffset += payloadSize;
                 totalProjectedPayloadSize += payloadSize;
                 
-                // Advance both pointers (handle dupes by advancing to next unique field)
+                // Advance both pointers - handle dupes by advancing to next unique field hopefully
                 do {
                     requestedIndex++;
                 } while (requestedIndex < sortedRequestedFields.length && sortedRequestedFields[requestedIndex] == targetFieldId);
@@ -232,7 +232,7 @@ public class ImprintOperations {
         var finalBuffer = ByteBuffer.allocate(totalSize);
         finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
         
-        // Write header (preserve original schema)
+        // header (preserve original schema)
         finalBuffer.put(Constants.MAGIC);
         finalBuffer.put(Constants.VERSION);
         finalBuffer.put(originalHeader.getFlags().getValue());
@@ -240,7 +240,7 @@ public class ImprintOperations {
         finalBuffer.putInt(originalHeader.getSchemaId().getSchemaHash());
         finalBuffer.putInt(totalPayloadSize);
         
-        // Write directory
+        // directory
         VarInt.encode(directoryEntries.size(), finalBuffer);
         for (var entry : directoryEntries) {
             finalBuffer.putShort(entry.fieldId);
@@ -248,7 +248,7 @@ public class ImprintOperations {
             finalBuffer.putInt(entry.offset);
         }
         
-        // Write payload
+        // payload
         for (var chunk : payloadChunks)
             finalBuffer.put(chunk);
 
@@ -261,11 +261,11 @@ public class ImprintOperations {
      * Create an empty record as serialized bytes
      */
     private static ByteBuffer createEmptyRecordBytes() {
-        // Minimal header + empty directory + empty payload
+        // header + empty directory + empty payload
         var buffer = ByteBuffer.allocate(Constants.HEADER_BYTES + 1); // +1 for varint 0
         buffer.order(ByteOrder.LITTLE_ENDIAN);
         
-        // Write header for empty record
+        // header for empty record
         buffer.put(Constants.MAGIC);
         buffer.put(Constants.VERSION);
         buffer.put((byte) 0x01);
@@ -273,7 +273,7 @@ public class ImprintOperations {
         buffer.putInt(0);
         buffer.putInt(0);
         
-        // Write empty directory
+        // empty directory
         VarInt.encode(0, buffer);
         
         buffer.flip();
