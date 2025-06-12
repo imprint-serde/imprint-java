@@ -35,7 +35,6 @@ import java.util.*;
 @SuppressWarnings("unused")
 public final class ImprintRecordBuilder {
     private final SchemaId schemaId;
-    // Custom int→object map optimized for primitive keys
     private final ImprintFieldObjectMap<FieldData> fields = new ImprintFieldObjectMap<>();
     private int estimatedPayloadSize = 0;
 
@@ -203,13 +202,13 @@ public final class ImprintRecordBuilder {
         Objects.requireNonNull(value, "Value cannot be null - use nullField() for explicit null values");
         var newEntry = new FieldData((short) id, value);
 
-        // Check if replacing an existing field - O(1) lookup without boxing!
+        // Check if replacing an existing field
         var oldEntry = fields.get(id);
         if (oldEntry != null) {
             estimatedPayloadSize -= estimateValueSize(oldEntry.value);
         }
 
-        // Add or replace field - O(1) operation without boxing!
+        // Add or replace field
         fields.put(id, newEntry);
         estimatedPayloadSize += estimateValueSize(newEntry.value);
         return this;
@@ -327,7 +326,6 @@ public final class ImprintRecordBuilder {
     }
 
     private void serializeValue(Value value, ByteBuffer buffer) throws ImprintException {
-        // Use TypeHandler for simple types
         switch (value.getTypeCode()) {
             case NULL:
             case BOOL:
