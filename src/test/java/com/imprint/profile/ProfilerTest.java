@@ -14,7 +14,7 @@ import java.util.Random;
 import java.util.stream.IntStream;
 
 
-//@Disabled
+@Disabled
 public class ProfilerTest {
 
     private static final int RECORD_SIZE = 50;
@@ -136,7 +136,7 @@ public class ProfilerTest {
     @Tag("serialization")
     @Tag("small-records")
     void profileSmallRecordSerialization() throws Exception {
-        profileSerialization("small records", RECORD_SIZE, 100_000);
+        profileSerialization("small records", RECORD_SIZE, 600_000);
     }
 
     @Test
