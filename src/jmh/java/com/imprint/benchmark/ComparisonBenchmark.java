@@ -30,7 +30,7 @@ public class ComparisonBenchmark {
             new KryoSerializingBenchmark(),
             new MessagePackSerializingBenchmark());
 
-    @Param({"Imprint", "Jackson-JSON", "Protobuf", "FlatBuffers", "Avro-Generic", "Thrift", "Kryo", "MessagePack", "CapnProto"})
+    @Param({"Imprint", "Jackson-JSON", "Protobuf", "FlatBuffers", "Avro-Generic", "Thrift", "Kryo", "MessagePack", ""})
     public String framework;
 
     private SerializingBenchmark serializingBenchmark;
