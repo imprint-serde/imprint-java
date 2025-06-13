@@ -6,6 +6,8 @@ import com.imprint.error.ImprintException;
 import com.imprint.types.MapKey;
 import com.imprint.types.TypeCode;
 import com.imprint.types.Value;
+import com.imprint.util.VarInt;
+import lombok.SneakyThrows;
 
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
@@ -36,19 +38,19 @@ import java.util.*;
 @SuppressWarnings("unused")
 public final class ImprintRecordBuilder {
     private final SchemaId schemaId;
-    private final ImprintFieldObjectMap<FieldData> fields = new ImprintFieldObjectMap<>();
+    private final ImprintFieldObjectMap<ValueWithType> fields = new ImprintFieldObjectMap<>();
     private int estimatedPayloadSize = 0;
 
-    static final class FieldData {
-        final short id;
+    // Minimal wrapper to avoid getTypeCode() virtual dispatch
+    static final class ValueWithType {
         final Value value;
-        
-        FieldData(short id, Value value) {
-            this.id = id;
+        final byte typeCode;
+
+        ValueWithType(Value value, byte typeCode) {
             this.value = value;
+            this.typeCode = typeCode;
         }
     }
-    
 
     ImprintRecordBuilder(SchemaId schemaId) {
         this.schemaId = Objects.requireNonNull(schemaId, "SchemaId cannot be null");
@@ -173,30 +175,31 @@ public final class ImprintRecordBuilder {
     public ByteBuffer buildToBuffer() throws ImprintException {
         // 1. Calculate conservative size BEFORE sorting (which invalidates the map)
         int conservativeSize = calculateConservativePayloadSize();
-        
+
         // 2. Sort fields by ID for directory ordering (zero allocation)
         var sortedFieldsResult = getSortedFieldsResult();
-        var sortedFields = sortedFieldsResult.values;
+        var sortedValues = sortedFieldsResult.values;
+        var sortedKeys = sortedFieldsResult.keys;
         var fieldCount = sortedFieldsResult.count;
-        
+
         // 3. Serialize payload and calculate offsets with overflow handling
         PayloadSerializationResult result = null;
         int bufferSizeMultiplier = 1;
-        
+
         while (result == null && bufferSizeMultiplier <= 64) {
             try {
-                result = serializePayload(sortedFields, fieldCount, conservativeSize, bufferSizeMultiplier);
+                result = serializePayload(sortedValues, fieldCount, conservativeSize, bufferSizeMultiplier);
             } catch (BufferOverflowException e) {
                 bufferSizeMultiplier *= 2; // Try 2x, 4x, 8x, 16x, 32x, 64x
             }
         }
-        
+
         if (result == null) {
-            throw new ImprintException(ErrorType.SERIALIZATION_ERROR, 
-                "Failed to serialize payload even with 64x buffer size");
+            throw new ImprintException(ErrorType.SERIALIZATION_ERROR,
+                    "Failed to serialize payload even with 64x buffer size");
         }
-        
-        return serializeToBuffer(schemaId, sortedFields, result.offsets, fieldCount, result.payload);
+
+        return serializeToBuffer(schemaId, sortedKeys, sortedValues, result.offsets, fieldCount, result.payload);
     }
 
     /**
@@ -208,19 +211,28 @@ public final class ImprintRecordBuilder {
      * @param typeCode the known type code (avoids virtual call)
      * @return this builder for method chaining
      */
+    @SneakyThrows
     private ImprintRecordBuilder addField(int id, Value value, TypeCode typeCode) {
         Objects.requireNonNull(value, "Value cannot be null - use nullField() for explicit null values");
-        var newEntry = new FieldData((short) id, value);
 
-        // Check if replacing an existing field
-        var oldEntry = fields.get(id);
+        // Calculate size for tracking (but don't store it)
+        int newSize = fastEstimateFieldSize(value, typeCode);
+
+        // Create wrapper to avoid virtual dispatch later
+        var newEntry = new ValueWithType(value, typeCode.getCode());
+
+        // Efficient put with old value return - single hash operation
+        var oldEntry = fields.putAndReturnOld(id, newEntry);
+
         if (oldEntry != null) {
-            estimatedPayloadSize -= fastEstimateFieldSize(oldEntry.value, oldEntry.value.getTypeCode());
+            // Field replacement - subtract old size, add new size
+            int oldSize = fastEstimateFieldSize(oldEntry.value, TypeCode.fromByte(oldEntry.typeCode));
+            estimatedPayloadSize += newSize - oldSize;
+        } else {
+            // New field - just add new size
+            estimatedPayloadSize += newSize;
         }
 
-        // Add or replace field
-        fields.put(id, newEntry);
-        estimatedPayloadSize += fastEstimateFieldSize(newEntry.value, typeCode);
         return this;
     }
 
@@ -300,8 +312,8 @@ public final class ImprintRecordBuilder {
     }
 
     /**
-     * Fast heuristic-based field size estimation (no expensive operations).
-     * TypeCode passed directly to avoid virtual call.
+     * Fast conservative field size estimation optimized for performance.
+     * Uses minimal operations while handling both normal and large data correctly.
      */
     private int fastEstimateFieldSize(Value value, TypeCode typeCode) {
         switch (typeCode) {
@@ -314,27 +326,30 @@ public final class ImprintRecordBuilder {
             case FLOAT64:
                 return 8;
             case STRING:
+                // Smart estimation: check if it's a large string with minimal overhead
                 if (value instanceof Value.StringValue) {
-                    return 5 + (((Value.StringValue) value).getValue().length() * 3 / 2);
+                    int len = ((Value.StringValue) value).getValue().length();
+                    return len > 1000 ? 5 + len * 3 : 256; // UTF-8 worst case for large strings
                 } else {
-                    return 5 + ((Value.StringBufferValue) value).getBuffer().remaining();
+                    int remaining = ((Value.StringBufferValue) value).getBuffer().remaining();
+                    return remaining > 1000 ? 5 + remaining : 256;
                 }
             case BYTES:
+                // Smart estimation: check if it's large bytes with minimal overhead
                 if (value instanceof Value.BytesValue) {
-                    return 5 + ((Value.BytesValue) value).getValue().length;
+                    int len = ((Value.BytesValue) value).getValue().length;
+                    return len > 1000 ? 5 + len : 256;
                 } else {
-                    return 5 + ((Value.BytesBufferValue) value).getBuffer().remaining();
+                    int remaining = ((Value.BytesBufferValue) value).getBuffer().remaining();
+                    return remaining > 1000 ? 5 + remaining : 256;
                 }
             case ARRAY:
-                var elements = ((Value.ArrayValue) value).getValue();
-                return 5 + 1 + (elements.size() * 16);
+                return 512; // Conservative: most arrays are < 512 bytes
             case MAP:
-                var map = ((Value.MapValue) value).getValue();
-                return 5 + 2 + (map.size() * 32); //32 bytes per entry
+                return 512; // Conservative: most maps are < 512 bytes
             case ROW:
-                // Use actual size if available
-                return ((Value.RowValue) value).getValue().getSerializedSize();
-                
+                return 1024; // Conservative: most nested records are < 1KB
+
             default:
                 return 64; // Fallback
         }
@@ -347,7 +362,7 @@ public final class ImprintRecordBuilder {
         // Add 25% buffer for safety margin
         return Math.max(estimatedPayloadSize + (estimatedPayloadSize / 4), 4096);
     }
-    
+
 
     /**
      * Result of payload serialization containing offsets and final payload buffer.
@@ -355,7 +370,7 @@ public final class ImprintRecordBuilder {
     private static class PayloadSerializationResult {
         final int[] offsets;
         final ByteBuffer payload;
-        
+
         PayloadSerializationResult(int[] offsets, ByteBuffer payload) {
             this.offsets = offsets;
             this.payload = payload;
@@ -377,9 +392,9 @@ public final class ImprintRecordBuilder {
     private PayloadSerializationResult doSerializePayload(Object[] sortedFields, int fieldCount, ByteBuffer payloadBuffer) throws ImprintException {
         int[] offsets = new int[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
-            var fieldData = (FieldData) sortedFields[i];
+            var entry = (ValueWithType) sortedFields[i];
             offsets[i] = payloadBuffer.position();
-            serializeValue(fieldData.value, payloadBuffer);
+            serializeValue(entry.value, payloadBuffer);
         }
         payloadBuffer.flip();
         var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
@@ -387,28 +402,46 @@ public final class ImprintRecordBuilder {
     }
 
     private void serializeValue(Value value, ByteBuffer buffer) throws ImprintException {
-        switch (value.getTypeCode()) {
+        var typeCode = value.getTypeCode();
+        switch (typeCode) {
             case NULL:
-            case BOOL:
-            case INT32:
-            case INT64:
-            case FLOAT32:
-            case FLOAT64:
-            case BYTES:
-            case STRING:
-            case ARRAY:
-            case MAP:
-                value.getTypeCode().getHandler().serialize(value, buffer);
+                // NULL values have no payload
                 break;
-            //TODO eliminate this switch entirely by implementing a ROW TypeHandler
+            case BOOL:
+                Serializers.serializeBool((Value.BoolValue) value, buffer);
+                break;
+            case INT32:
+                Serializers.serializeInt32((Value.Int32Value) value, buffer);
+                break;
+            case INT64:
+                Serializers.serializeInt64((Value.Int64Value) value, buffer);
+                break;
+            case FLOAT32:
+                Serializers.serializeFloat32((Value.Float32Value) value, buffer);
+                break;
+            case FLOAT64:
+                Serializers.serializeFloat64((Value.Float64Value) value, buffer);
+                break;
+            case STRING:
+                Serializers.serializeString(value, buffer);
+                break;
+            case BYTES:
+                Serializers.serializeBytes(value, buffer);
+                break;
+            case ARRAY:
+                Serializers.serializeArray((Value.ArrayValue) value, buffer);
+                break;
+            case MAP:
+                Serializers.serializeMap((Value.MapValue) value, buffer);
+                break;
             case ROW:
+                // Keep existing nested record serialization
                 Value.RowValue rowValue = (Value.RowValue) value;
                 var serializedRow = rowValue.getValue().serializeToBuffer();
                 buffer.put(serializedRow);
                 break;
-
             default:
-                throw new ImprintException(ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + value.getTypeCode());
+                throw new ImprintException(ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + typeCode);
         }
     }
 
@@ -416,18 +449,18 @@ public final class ImprintRecordBuilder {
      * Get fields sorted by ID from the map.
      * Returns internal map array reference + count to avoid any copying but sacrifices the map structure in the process.
      */
-    private ImprintFieldObjectMap.SortedValuesResult getSortedFieldsResult() {
-        return fields.getSortedValues();
+    private ImprintFieldObjectMap.SortedFieldsResult getSortedFieldsResult() {
+        return fields.getSortedFields();
     }
 
     /**
      * Serialize components into a single ByteBuffer.
      */
-    private static ByteBuffer serializeToBuffer(SchemaId schemaId, Object[] sortedFields, int[] offsets, int fieldCount, ByteBuffer payload) {
+    private static ByteBuffer serializeToBuffer(SchemaId schemaId, short[] sortedKeys, Object[] sortedValues, int[] offsets, int fieldCount, ByteBuffer payload) {
         var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
-        var directoryBuffer = ImprintRecord.createDirectoryBufferFromSorted(sortedFields, offsets, fieldCount);
+        int directorySize = ImprintRecord.calculateDirectorySize(fieldCount);
 
-        int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
+        int finalSize = Constants.HEADER_BYTES + directorySize + payload.remaining();
         var finalBuffer = ByteBuffer.allocate(finalSize);
         finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
@@ -438,10 +471,191 @@ public final class ImprintRecordBuilder {
         finalBuffer.putInt(header.getSchemaId().getFieldSpaceId());
         finalBuffer.putInt(header.getSchemaId().getSchemaHash());
         finalBuffer.putInt(header.getPayloadSize());
-        finalBuffer.put(directoryBuffer);
+
+        // Write directory directly to final buffer
+        ImprintRecord.writeDirectoryToBuffer(sortedKeys, sortedValues, offsets, fieldCount, finalBuffer);
+
+        // Write payload
         finalBuffer.put(payload);
 
         finalBuffer.flip();
         return finalBuffer.asReadOnlyBuffer();
+    }
+
+    /**
+     * Direct serializers that avoid virtual dispatch overhead.
+     */
+    static class Serializers {
+        static void serializeBool(Value.BoolValue value, ByteBuffer buffer) {
+            buffer.put((byte) (value.getValue() ? 1 : 0));
+        }
+
+        static void serializeInt32(Value.Int32Value value, ByteBuffer buffer) {
+            buffer.putInt(value.getValue());
+        }
+
+        static void serializeInt64(Value.Int64Value value, ByteBuffer buffer) {
+            buffer.putLong(value.getValue());
+        }
+
+        static void serializeFloat32(Value.Float32Value value, ByteBuffer buffer) {
+            buffer.putFloat(value.getValue());
+        }
+
+        static void serializeFloat64(Value.Float64Value value, ByteBuffer buffer) {
+            buffer.putDouble(value.getValue());
+        }
+
+        static void serializeString(Value value, ByteBuffer buffer) {
+            if (value instanceof Value.StringValue) {
+                var stringValue = (Value.StringValue) value;
+                var utf8Bytes = stringValue.getUtf8Bytes(); // Already cached!
+                VarInt.encode(utf8Bytes.length, buffer);
+                buffer.put(utf8Bytes);
+            } else {
+                var bufferValue = (Value.StringBufferValue) value;
+                var stringBuffer = bufferValue.getBuffer();
+                VarInt.encode(stringBuffer.remaining(), buffer);
+                buffer.put(stringBuffer);
+            }
+        }
+
+        static void serializeBytes(Value value, ByteBuffer buffer) {
+            if (value instanceof Value.BytesBufferValue) {
+                var bufferValue = (Value.BytesBufferValue) value;
+                var bytesBuffer = bufferValue.getBuffer();
+                VarInt.encode(bytesBuffer.remaining(), buffer);
+                buffer.put(bytesBuffer);
+            } else {
+                var bytesValue = (Value.BytesValue) value;
+                byte[] bytes = bytesValue.getValue();
+                VarInt.encode(bytes.length, buffer);
+                buffer.put(bytes);
+            }
+        }
+
+        static void serializeArray(Value.ArrayValue value, ByteBuffer buffer) throws ImprintException {
+            var elements = value.getValue();
+            VarInt.encode(elements.size(), buffer);
+
+            if (elements.isEmpty()) return;
+
+            var elementType = elements.get(0).getTypeCode();
+            buffer.put(elementType.getCode());
+
+            for (var element : elements) {
+                if (element.getTypeCode() != elementType) {
+                    throw new ImprintException(ErrorType.SCHEMA_ERROR,
+                            "Array elements must have same type code: " +
+                                    element.getTypeCode() + " != " + elementType);
+                }
+                // Recursive call to serialize each element
+                serializeValueByType(element, elementType, buffer);
+            }
+        }
+
+        static void serializeMap(Value.MapValue value, ByteBuffer buffer) throws ImprintException {
+            var map = value.getValue();
+            VarInt.encode(map.size(), buffer);
+
+            if (map.isEmpty()) return;
+
+            var iterator = map.entrySet().iterator();
+            var first = iterator.next();
+            var keyType = first.getKey().getTypeCode();
+            var valueType = first.getValue().getTypeCode();
+
+            buffer.put(keyType.getCode());
+            buffer.put(valueType.getCode());
+
+            serializeMapKey(first.getKey(), buffer);
+            serializeValueByType(first.getValue(), valueType, buffer);
+
+            while (iterator.hasNext()) {
+                var entry = iterator.next();
+                if (entry.getKey().getTypeCode() != keyType) {
+                    throw new ImprintException(ErrorType.SCHEMA_ERROR,
+                            "Map keys must have same type code: " +
+                                    entry.getKey().getTypeCode() + " != " + keyType);
+                }
+                if (entry.getValue().getTypeCode() != valueType) {
+                    throw new ImprintException(ErrorType.SCHEMA_ERROR,
+                            "Map values must have same type code: " +
+                                    entry.getValue().getTypeCode() + " != " + valueType);
+                }
+
+                serializeMapKey(entry.getKey(), buffer);
+                serializeValueByType(entry.getValue(), valueType, buffer);
+            }
+        }
+
+        // Helper method to avoid infinite recursion
+        private static void serializeValueByType(Value value, TypeCode typeCode, ByteBuffer buffer) throws ImprintException {
+            switch (typeCode) {
+                case NULL:
+                    break;
+                case BOOL:
+                    serializeBool((Value.BoolValue) value, buffer);
+                    break;
+                case INT32:
+                    serializeInt32((Value.Int32Value) value, buffer);
+                    break;
+                case INT64:
+                    serializeInt64((Value.Int64Value) value, buffer);
+                    break;
+                case FLOAT32:
+                    serializeFloat32((Value.Float32Value) value, buffer);
+                    break;
+                case FLOAT64:
+                    serializeFloat64((Value.Float64Value) value, buffer);
+                    break;
+                case STRING:
+                    serializeString(value, buffer);
+                    break;
+                case BYTES:
+                    serializeBytes(value, buffer);
+                    break;
+                case ARRAY:
+                    serializeArray((Value.ArrayValue) value, buffer);
+                    break;
+                case MAP:
+                    serializeMap((Value.MapValue) value, buffer);
+                    break;
+                default:
+                    throw new ImprintException(ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + typeCode);
+            }
+        }
+
+        private static void serializeMapKey(MapKey key, ByteBuffer buffer) throws ImprintException {
+            switch (key.getTypeCode()) {
+                case INT32:
+                    MapKey.Int32Key int32Key = (MapKey.Int32Key) key;
+                    buffer.putInt(int32Key.getValue());
+                    break;
+
+                case INT64:
+                    MapKey.Int64Key int64Key = (MapKey.Int64Key) key;
+                    buffer.putLong(int64Key.getValue());
+                    break;
+
+                case BYTES:
+                    MapKey.BytesKey bytesKey = (MapKey.BytesKey) key;
+                    byte[] bytes = bytesKey.getValue();
+                    VarInt.encode(bytes.length, buffer);
+                    buffer.put(bytes);
+                    break;
+
+                case STRING:
+                    MapKey.StringKey stringKey = (MapKey.StringKey) key;
+                    byte[] stringBytes = stringKey.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    VarInt.encode(stringBytes.length, buffer);
+                    buffer.put(stringBytes);
+                    break;
+
+                default:
+                    throw new ImprintException(ErrorType.SERIALIZATION_ERROR,
+                            "Invalid map key type: " + key.getTypeCode());
+            }
+        }
     }
 }

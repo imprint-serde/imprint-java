@@ -48,6 +48,18 @@ final class ImprintFieldObjectMap<T> {
         putValue((short) key, value);
     }
 
+    /**
+     * Put a value and return the previous value if any.
+     * @return the previous value, or null if no previous value existed
+     */
+    public T putAndReturnOld(int key, T value) {
+        if (poisoned)
+            throw new IllegalStateException("Map is invalid after compaction - cannot perform operations");
+        if (key > Short.MAX_VALUE)
+            throw new IllegalArgumentException("Field ID must be 0-" + Short.MAX_VALUE + ", got: " + key);
+        return putValueAndReturnOld((short) key, value);
+    }
+
     private void  putValue(short key, T value) {
         if (poisoned)
             throw new IllegalStateException("Map is invalid after compaction - cannot perform operations");
@@ -62,6 +74,28 @@ final class ImprintFieldObjectMap<T> {
         }
         keys[index] = key;
         values[index] = value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private T putValueAndReturnOld(short key, T value) {
+        if (poisoned)
+            throw new IllegalStateException("Map is invalid after compaction - cannot perform operations");
+        if (key < 0)
+            throw new IllegalArgumentException("Field ID must be 0-" + Short.MAX_VALUE + ", got: " + key);
+
+        if (size >= threshold)
+            resize();
+        int index = findSlot(key);
+        T oldValue = null;
+        if (keys[index] == EMPTY_KEY) {
+            size++;
+        } else {
+            // Existing key - capture old value
+            oldValue = (T) values[index];
+        }
+        keys[index] = key;
+        values[index] = value;
+        return oldValue;
     }
     
     @SuppressWarnings("unchecked")
@@ -302,5 +336,37 @@ final class ImprintFieldObjectMap<T> {
     private static int nextPowerOfTwo(int n) {
         if (n <= 1) return 1;
         return Integer.highestOneBit(n - 1) << 1;
+    }
+
+    /**
+     * Result holder for in-place sorted fields - returns both keys and values.
+     */
+    public static final class SortedFieldsResult {
+        public final short[] keys;
+        public final Object[] values;
+        public final int count;
+
+        SortedFieldsResult(short[] keys, Object[] values, int count) {
+            this.keys = keys;
+            this.values = values;
+            this.count = count;
+        }
+    }
+
+    /**
+     * Get both keys and values sorted by key order with zero allocation.
+     * WARNING: Modifies internal state, and renders map operations unstable and in an illegal state.
+     */
+    public SortedFieldsResult getSortedFields() {
+        if (size == 0) {
+            poisoned = true;
+            return new SortedFieldsResult(keys, values, 0);
+        }
+        
+        compactEntries();
+        sortEntriesByKey(size);
+        poisoned = true;
+        
+        return new SortedFieldsResult(keys, values, size);
     }
 }
