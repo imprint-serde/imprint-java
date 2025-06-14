@@ -1,12 +1,16 @@
 package com.imprint.benchmark;
 
 import com.imprint.core.ImprintRecord;
-import com.imprint.core.ImprintWriter;
+import com.imprint.core.ImprintRecordBuilder;
 import com.imprint.core.SchemaId;
 import com.imprint.types.MapKey;
 import com.imprint.types.Value;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -21,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
 @Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 7, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(1)
 public class SerializationBenchmark {
 
@@ -35,10 +39,10 @@ public class SerializationBenchmark {
 
     @Setup
     public void setup() throws Exception {
-        // Create test records of varying sizes
-        smallRecord = createSmallRecord();
-        mediumRecord = createMediumRecord();
-        largeRecord = createLargeRecord();
+        // Create test records of varying sizes for deserialization benchmarks
+        smallRecord = createSmallRecord().build();
+        mediumRecord = createMediumRecord().build();
+        largeRecord = createLargeRecord().build();
         
         // Pre-serialize for deserialization benchmarks
         smallRecordBytes = smallRecord.serializeToBuffer();
@@ -49,20 +53,20 @@ public class SerializationBenchmark {
     // ===== SERIALIZATION BENCHMARKS =====
 
     @Benchmark
-    public void serializeSmallRecord(Blackhole bh) {
-        ByteBuffer result = smallRecord.serializeToBuffer();
+    public void buildAndSerializeSmallRecord(Blackhole bh) throws Exception {
+        ByteBuffer result = createSmallRecord().buildToBuffer();
         bh.consume(result);
     }
 
     @Benchmark
-    public void serializeMediumRecord(Blackhole bh) {
-        ByteBuffer result = mediumRecord.serializeToBuffer();
+    public void buildAndSerializeMediumRecord(Blackhole bh) throws Exception {
+        ByteBuffer result = createMediumRecord().buildToBuffer();
         bh.consume(result);
     }
 
     @Benchmark
-    public void serializeLargeRecord(Blackhole bh) {
-        ByteBuffer result = largeRecord.serializeToBuffer();
+    public void buildAndSerializeLargeRecord(Blackhole bh) throws Exception {
+        ByteBuffer result = createLargeRecord().buildToBuffer();
         bh.consume(result);
     }
 
@@ -88,79 +92,89 @@ public class SerializationBenchmark {
 
     // ===== HELPER METHODS =====
 
-    private ImprintRecord createSmallRecord() throws Exception {
-        var writer = new ImprintWriter(new SchemaId(1, 0x12345678));
-        
+    private ImprintRecordBuilder createSmallRecord() throws Exception {
         // Small record: ~10 fields, simple types
-        writer.addField(1, Value.fromString("Product"));
-        writer.addField(2, Value.fromInt32(12345));
-        writer.addField(3, Value.fromFloat64(99.99));
-        writer.addField(4, Value.fromBoolean(true));
-        writer.addField(5, Value.fromString("Electronics"));
-        
-        return writer.build();
+        return ImprintRecord.builder(new SchemaId(1, 0x12345678))
+            .field(1, "Product")
+            .field(2, 12345)
+            .field(3, 99.99)
+            .field(4, true)
+            .field(5, "Electronics");
     }
 
-    private ImprintRecord createMediumRecord() throws Exception {
-        var writer = new ImprintWriter(new SchemaId(1, 0x12345678));
+    private ImprintRecordBuilder createMediumRecord() throws Exception {
+        var builder = ImprintRecord.builder(new SchemaId(1, 0x12345678));
         
         // Medium record: ~50 fields, mixed types including arrays
-        writer.addField(1, Value.fromString("Product"));
-        writer.addField(2, Value.fromInt32(12345));
-        writer.addField(3, Value.fromFloat64(99.99));
-        writer.addField(4, Value.fromBoolean(true));
-        writer.addField(5, Value.fromString("Electronics"));
+        builder.field(1, "Product");
+        builder.field(2, 12345);
+        builder.field(3, 99.99);
+        builder.field(4, true);
+        builder.field(5, "Electronics");
         
         // Add array field
         var tags = Arrays.asList(
-            Value.fromString("popular"),
-            Value.fromString("trending"),
-            Value.fromString("bestseller")
+            "popular",
+            "trending",
+            "bestseller"
         );
-        writer.addField(6, Value.fromArray(tags));
+        builder.field(6, tags);
         
         // Add map field (all string values for consistency)
-        var metadata = new HashMap<MapKey, Value>();
-        metadata.put(MapKey.fromString("manufacturer"), Value.fromString("TechCorp"));
-        metadata.put(MapKey.fromString("model"), Value.fromString("TC-2024"));
-        metadata.put(MapKey.fromString("year"), Value.fromString("2024"));
-        writer.addField(7, Value.fromMap(metadata));
+        var metadata = new HashMap<String, Object>();
+        metadata.put("manufacturer", "TechCorp");
+        metadata.put("model", "TC-2024");
+        metadata.put("year", "2024");
+        builder.field(7, metadata);
         
         // Add more fields for medium size
         for (int i = 8; i <= 50; i++) {
-            writer.addField(i, Value.fromString("field_" + i + "_value"));
+            builder.field(i, "field_" + i + "_value");
         }
         
-        return writer.build();
+        return builder;
     }
 
-    private ImprintRecord createLargeRecord() throws Exception {
-        var writer = new ImprintWriter(new SchemaId(1, 0x12345678));
+    private ImprintRecordBuilder createLargeRecord() throws Exception {
+        var builder = ImprintRecord.builder(new SchemaId(1, 0x12345678));
         
         // Large record: ~200 fields, complex nested structures
-        writer.addField(1, Value.fromString("LargeProduct"));
-        writer.addField(2, Value.fromInt32(12345));
-        writer.addField(3, Value.fromFloat64(99.99));
+        builder.field(1, "LargeProduct");
+        builder.field(2, 12345);
+        builder.field(3, 99.99);
         
         // Large array
-        var largeArray = new ArrayList<Value>();
+        var largeArray = new ArrayList<String>();
         for (int i = 0; i < 100; i++) {
-            largeArray.add(Value.fromString("item_" + i));
+            largeArray.add("item_" + i);
         }
-        writer.addField(4, Value.fromArray(largeArray));
+        builder.field(4, largeArray);
         
         // Large map
-        var largeMap = new HashMap<MapKey, Value>();
+        var largeMap = new HashMap<String, String>();
         for (int i = 0; i < 50; i++) {
-            largeMap.put(MapKey.fromString("key_" + i), Value.fromString("value_" + i));
+            largeMap.put("key_" + i, "value_" + i);
         }
-        writer.addField(5, Value.fromMap(largeMap));
+        builder.field(5, largeMap);
         
         // Many string fields
         for (int i = 6; i <= 200; i++) {
-            writer.addField(i, Value.fromString("this_is_a_longer_field_value_for_field_" + i + "_to_increase_record_size"));
+            builder.field(i, "this_is_a_longer_field_value_for_field_" + i + "_to_increase_record_size");
         }
         
-        return writer.build();
+        return builder;
+    }
+
+    public static void main(String[] args) throws RunnerException {
+        Options opt = new OptionsBuilder()
+                .include(SerializationBenchmark.class.getSimpleName())
+                .forks(1)
+                .warmupIterations(5)
+                .measurementIterations(5)
+                .mode(Mode.AverageTime)
+                .timeUnit(TimeUnit.NANOSECONDS)
+                .build();
+
+        new Runner(opt).run();
     }
 }

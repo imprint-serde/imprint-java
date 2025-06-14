@@ -57,10 +57,11 @@ public abstract class Value {
     public static Value fromString(String value) {
         return new StringValue(value);
     }
-    
+
     public static Value fromStringBuffer(ByteBuffer value) {
         return new StringBufferValue(value);
     }
+
     
     public static Value fromArray(List<Value> value) {
         return new ArrayValue(value);
@@ -284,20 +285,21 @@ public abstract class Value {
     public static class StringValue extends Value {
         @Getter
         private final String value;
-        private volatile byte[] cachedUtf8Bytes; // Cache UTF-8 encoding
+        private byte[] utf8BytesCache;
         
         public StringValue(String value) {
             this.value = Objects.requireNonNull(value, "String cannot be null");
         }
 
         public byte[] getUtf8Bytes() {
-            var cached = cachedUtf8Bytes;
-            if (cached == null) {
-                // UTF8 is idempotent so no need to synchronize
-                cached = value.getBytes(StandardCharsets.UTF_8);
-                cachedUtf8Bytes = cached;
+            if (utf8BytesCache == null) {
+                utf8BytesCache = value.getBytes(StandardCharsets.UTF_8);
             }
-            return cached; // Return computed value
+            return utf8BytesCache;
+        }
+
+        public int getUtf8Length() {
+            return getUtf8Bytes().length;
         }
 
         @Override
@@ -332,7 +334,7 @@ public abstract class Value {
     // String Value (ByteBuffer-based)
     public static class StringBufferValue extends Value {
         private final ByteBuffer value;
-        private volatile String cachedString;
+        private String cachedString;
 
         private static final int THREAD_LOCAL_BUFFER_SIZE = 1024;
         private static final ThreadLocal<byte[]> DECODE_BUFFER_CACHE =

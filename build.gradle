@@ -42,7 +42,7 @@ dependencies {
     // Suppress SLF4J warnings
     jmhImplementation 'org.slf4j:slf4j-nop:1.7.36'
 
-    // Competitor libraries for benchmarking (JMH only)
+    // Other serialization libraries for benchmarking (JMH only)
     jmhImplementation 'com.google.protobuf:protobuf-java:3.25.1'
     jmhImplementation 'org.apache.avro:avro:1.11.3'
     jmhImplementation 'com.fasterxml.jackson.core:jackson-databind:2.16.0'
@@ -50,6 +50,8 @@ dependencies {
     jmhImplementation 'com.esotericsoftware:kryo:5.4.0'
     jmhImplementation 'org.msgpack:msgpack-core:0.9.8'
     jmhImplementation 'org.msgpack:jackson-dataformat-msgpack:0.9.8'
+    jmhImplementation 'org.apache.thrift:libthrift:0.19.0'
+    jmhImplementation 'javax.annotation:javax.annotation-api:1.3.2'
 }
 
 protobuf {
@@ -137,11 +139,64 @@ tasks.register('generateFlatBuffers', Exec) {
     }
 }
 
+// Task to download the Thrift compiler
+tasks.register('downloadThrift', Exec) {
+    description = 'Download Thrift compiler'
+    group = 'build setup'
+
+    def thriftVersion = "0.19.0"
+    def thriftExecutable = file("${buildDir}/thrift/thrift.exe")
+    def thriftUrl = "https://archive.apache.org/dist/thrift/${thriftVersion}/thrift-${thriftVersion}.exe"
+
+    outputs.file(thriftExecutable)
+
+    onlyIf {
+        !thriftExecutable.exists() && System.getProperty('os.name').toLowerCase().contains('windows')
+    }
+
+    doFirst {
+        println "Downloading Thrift compiler for Windows from $thriftUrl..."
+        thriftExecutable.parentFile.mkdirs()
+    }
+
+    commandLine 'curl', '-L', '-o', thriftExecutable.absolutePath, thriftUrl
+
+    doLast {
+        println "Thrift compiler downloaded to: ${thriftExecutable}"
+    }
+}
+
+// Task to generate Java code from Thrift IDL files for JMH benchmarks
+tasks.register('generateJmhThrift', Exec) {
+    dependsOn tasks.downloadThrift
+    description = 'Generate Java classes from Thrift schema'
+    group = 'build'
+
+    def thriftExecutable = file("${buildDir}/thrift/thrift.exe")
+    def schemaFile = file('src/jmh/thrift/test_record.thrift')
+    def outputDir = file('build/generated-src/thrift/jmh/java')
+
+    // Only run if the thrift executable exists (i.e., on Windows)
+    onlyIf { thriftExecutable.exists() }
+
+    commandLine thriftExecutable.absolutePath, '-r', '--gen', 'java', '-o', outputDir.absolutePath, schemaFile.absolutePath
+
+    inputs.file(schemaFile)
+    outputs.dir(outputDir)
+
+    doFirst {
+        outputDir.mkdirs()
+    }
+}
+
+
 // Add generated FlatBuffers sources to JMH source set
 sourceSets {
     jmh {
         java {
             srcDir 'build/generated/source/flatbuffers/jmh/java'
+            srcDir 'build/generated-src/thrift/jmh/java'
+            srcDir 'build/generated/sbe/java'
         }
         proto {
             srcDir 'src/jmh/proto'
@@ -149,8 +204,9 @@ sourceSets {
     }
 }
 
-// Make JMH compilation depend on FlatBuffers generation
+// Make JMH compilation depend on generation tasks
 compileJmhJava.dependsOn generateFlatBuffers
+compileJmhJava.dependsOn generateJmhThrift
 
 // Handle duplicate proto files
 tasks.named('processJmhResources') {

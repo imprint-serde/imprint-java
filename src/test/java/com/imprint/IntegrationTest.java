@@ -623,4 +623,246 @@ public class IntegrationTest {
         assertEquals(999L, retrievedRow.getInt64(102));
         assertEquals("outer field", deserializedWithRow.getString(202));
     }
+
+    @Test
+    @DisplayName("Boundary Values: Numeric limits and special floating point values")
+    void testNumericBoundaryValues() throws ImprintException {
+        var schemaId = new SchemaId(60, 0xB0DA12);
+        var record = ImprintRecord.builder(schemaId)
+                .field(1, Integer.MAX_VALUE)
+                .field(2, Integer.MIN_VALUE)
+                .field(3, Long.MAX_VALUE)
+                .field(4, Long.MIN_VALUE)
+                .field(5, Float.MAX_VALUE)
+                .field(6, Float.MIN_VALUE)
+                .field(7, Float.NaN)
+                .field(8, Float.POSITIVE_INFINITY)
+                .field(9, Float.NEGATIVE_INFINITY)
+                .field(10, Double.MAX_VALUE)
+                .field(11, Double.MIN_VALUE)
+                .field(12, Double.NaN)
+                .field(13, Double.POSITIVE_INFINITY)
+                .field(14, Double.NEGATIVE_INFINITY)
+                .field(15, -0.0f)
+                .field(16, -0.0)
+                .build();
+
+        var deserialized = serializeAndDeserialize(record);
+
+        assertEquals(Integer.MAX_VALUE, deserialized.getInt32(1));
+        assertEquals(Integer.MIN_VALUE, deserialized.getInt32(2));
+        assertEquals(Long.MAX_VALUE, deserialized.getInt64(3));
+        assertEquals(Long.MIN_VALUE, deserialized.getInt64(4));
+        assertEquals(Float.MAX_VALUE, deserialized.getFloat32(5));
+        assertEquals(Float.MIN_VALUE, deserialized.getFloat32(6));
+        assertTrue(Float.isNaN(deserialized.getFloat32(7)));
+        assertTrue(Float.isInfinite(deserialized.getFloat32(8)) && deserialized.getFloat32(8) > 0);
+        assertTrue(Float.isInfinite(deserialized.getFloat32(9)) && deserialized.getFloat32(9) < 0);
+        assertEquals(Double.MAX_VALUE, deserialized.getFloat64(10));
+        assertEquals(Double.MIN_VALUE, deserialized.getFloat64(11));
+        assertTrue(Double.isNaN(deserialized.getFloat64(12)));
+        assertTrue(Double.isInfinite(deserialized.getFloat64(13)) && deserialized.getFloat64(13) > 0);
+        assertTrue(Double.isInfinite(deserialized.getFloat64(14)) && deserialized.getFloat64(14) < 0);
+        assertEquals(-0.0f, deserialized.getFloat32(15));
+        assertEquals(-0.0, deserialized.getFloat64(16));
+    }
+
+    @Test
+    @DisplayName("Unicode and Special Strings: International character support")
+    void testUnicodeAndSpecialStrings() throws ImprintException {
+        var schemaId = new SchemaId(61, 0x04100DE);
+        var record = ImprintRecord.builder(schemaId)
+                .field(1, "") // Empty string
+                .field(2, " ") // Single space
+                .field(3, "\n\t\r") // Whitespace characters
+                .field(4, "Hello, 世界! 🌍🚀") // Unicode: CJK + Emoji
+                .field(5, "مرحبا بالعالم") // Arabic (RTL)
+                .field(6, "Здравствуй мир") // Cyrillic
+                .field(7, "こんにちは世界") // Japanese
+                .field(8, "\u0000\u0001\u001F") // Control characters
+                .field(9, "A".repeat(10000)) // Large string
+                .build();
+
+        var deserialized = serializeAndDeserialize(record);
+
+        assertEquals("", deserialized.getString(1));
+        assertEquals(" ", deserialized.getString(2));
+        assertEquals("\n\t\r", deserialized.getString(3));
+        assertEquals("Hello, 世界! 🌍🚀", deserialized.getString(4));
+        assertEquals("مرحبا بالعالم", deserialized.getString(5));
+        assertEquals("Здравствуй мир", deserialized.getString(6));
+        assertEquals("こんにちは世界", deserialized.getString(7));
+        assertEquals("\u0000\u0001\u001F", deserialized.getString(8));
+        assertEquals("A".repeat(10000), deserialized.getString(9));
+    }
+
+    @Test
+    @DisplayName("Deep Nesting: Multiple levels of nested records")
+    void testDeepNesting() throws ImprintException {
+        // Create 5 levels of nesting
+        var level5 = ImprintRecord.builder(new SchemaId(65, 5))
+                .field(1, "deepest level")
+                .build();
+
+        var level4 = ImprintRecord.builder(new SchemaId(64, 4))
+                .field(1, level5)
+                .field(2, "level 4")
+                .build();
+
+        var level3 = ImprintRecord.builder(new SchemaId(63, 3))
+                .field(1, level4)
+                .field(2, "level 3")
+                .build();
+
+        var level2 = ImprintRecord.builder(new SchemaId(62, 2))
+                .field(1, level3)
+                .field(2, "level 2")
+                .build();
+
+        var level1 = ImprintRecord.builder(new SchemaId(61, 1))
+                .field(1, level2)
+                .field(2, "level 1")
+                .build();
+
+        var deserialized = serializeAndDeserialize(level1);
+
+        // Navigate through all levels
+        assertEquals("level 1", deserialized.getString(2));
+        var l2 = deserialized.getRow(1);
+        assertEquals("level 2", l2.getString(2));
+        var l3 = l2.getRow(1);
+        assertEquals("level 3", l3.getString(2));
+        var l4 = l3.getRow(1);
+        assertEquals("level 4", l4.getString(2));
+        var l5 = l4.getRow(1);
+        assertEquals("deepest level", l5.getString(1));
+    }
+
+    @Test
+    @DisplayName("Map Key Types: All supported map key types")
+    void testMapKeyTypeVariations() throws ImprintException {
+        var schemaId = new SchemaId(70, 0xAAB5E75);
+
+        // Create maps with different key types
+        var stringKeyMap = new HashMap<MapKey, Value>();
+        stringKeyMap.put(MapKey.fromString("string_key"), Value.fromString("string_value"));
+
+        var intKeyMap = new HashMap<MapKey, Value>();
+        intKeyMap.put(MapKey.fromInt32(42), Value.fromString("int_value"));
+
+        var longKeyMap = new HashMap<MapKey, Value>();
+        longKeyMap.put(MapKey.fromInt64(9876543210L), Value.fromString("long_value"));
+
+        var bytesKeyMap = new HashMap<MapKey, Value>();
+        bytesKeyMap.put(MapKey.fromBytes(new byte[]{1, 2, 3}), Value.fromString("bytes_value"));
+
+        var record = ImprintRecord.builder(schemaId)
+                .field(1, Value.fromMap(stringKeyMap))
+                .field(2, Value.fromMap(intKeyMap))
+                .field(3, Value.fromMap(longKeyMap))
+                .field(4, Value.fromMap(bytesKeyMap))
+                .build();
+
+        var deserialized = serializeAndDeserialize(record);
+
+        // Verify all map key types work correctly
+        assertEquals(Value.fromString("string_value"), 
+            deserialized.getMap(1).get(MapKey.fromString("string_key")));
+        assertEquals(Value.fromString("int_value"), 
+            deserialized.getMap(2).get(MapKey.fromInt32(42)));
+        assertEquals(Value.fromString("long_value"), 
+            deserialized.getMap(3).get(MapKey.fromInt64(9876543210L)));
+        assertEquals(Value.fromString("bytes_value"), 
+            deserialized.getMap(4).get(MapKey.fromBytes(new byte[]{1, 2, 3})));
+    }
+
+    @Test
+    @DisplayName("Large Data: Memory efficiency with large payloads")
+    void testLargeDataHandling() throws ImprintException {
+        var schemaId = new SchemaId(80, 0xB16DA7A);
+
+        // Create large byte arrays
+        byte[] largeBytes1 = new byte[100_000]; // 100KB
+        byte[] largeBytes2 = new byte[500_000]; // 500KB
+        Arrays.fill(largeBytes1, (byte) 0xAA);
+        Arrays.fill(largeBytes2, (byte) 0xBB);
+
+        // Create large string
+        String largeString = "Large data test: " + "X".repeat(50_000);
+
+        var record = ImprintRecord.builder(schemaId)
+                .field(1, largeBytes1)
+                .field(2, largeBytes2)
+                .field(3, largeString)
+                .field(4, "small field")
+                .build();
+
+        // Verify large record can be serialized and deserialized
+        var deserialized = serializeAndDeserialize(record);
+
+        assertArrayEquals(largeBytes1, deserialized.getBytes(1));
+        assertArrayEquals(largeBytes2, deserialized.getBytes(2));
+        assertEquals(largeString, deserialized.getString(3));
+        assertEquals("small field", deserialized.getString(4));
+
+        // Test projection still works with large data
+        var projected = record.project(4);
+        assertEquals(1, projected.getDirectory().size());
+        assertEquals("small field", projected.getString(4));
+
+        // Verify original large data is excluded from projection
+        assertTrue(projected.getSerializedSize() < record.getSerializedSize() / 10);
+    }
+
+    @Test
+    @DisplayName("Error Handling: Empty data detection")
+    void testEmptyDataHandling() {
+        // Empty data should throw exception
+        assertThrows(Exception.class, () -> ImprintRecord.deserialize(new byte[0]));
+        
+        // Null data should throw exception
+        assertThrows(Exception.class, () -> ImprintRecord.deserialize((byte[]) null));
+    }
+
+    @Test
+    @DisplayName("Complex Operations: Bytes-to-bytes vs object operations equivalence")
+    void testBytesToBytesEquivalence() throws ImprintException {
+        var schemaId = new SchemaId(100, 0xB17E5);
+        
+        var record1 = ImprintRecord.builder(schemaId)
+                .field(1, "record1 field1")
+                .field(3, 100)
+                .field(5, true)
+                .build();
+
+        var record2 = ImprintRecord.builder(schemaId)
+                .field(2, "record2 field2")
+                .field(4, 200L)
+                .field(6, 3.14)
+                .build();
+
+        // Test merge equivalence
+        var objectMerged = record1.merge(record2);
+        var bytesMerged = com.imprint.ops.ImprintOperations.mergeBytes(
+            record1.serializeToBuffer(), 
+            record2.serializeToBuffer()
+        );
+        var bytesMergedRecord = ImprintRecord.deserialize(bytesMerged);
+
+        assertEquals(objectMerged.getDirectory().size(), bytesMergedRecord.getDirectory().size());
+        assertEquals(objectMerged.getString(1), bytesMergedRecord.getString(1));
+        assertEquals(objectMerged.getString(2), bytesMergedRecord.getString(2));
+        assertEquals(objectMerged.getInt32(3), bytesMergedRecord.getInt32(3));
+
+        // Test project equivalence
+        var objectProjected = record1.project(1, 3);
+        var bytesProjected = com.imprint.ops.ImprintOperations.projectBytes(
+            record1.serializeToBuffer(), 1, 3
+        );
+        var bytesProjectedRecord = ImprintRecord.deserialize(bytesProjected);
+
+        assertEquals(objectProjected.getDirectory().size(), bytesProjectedRecord.getDirectory().size());
+        assertEquals(objectProjected.getString(1), bytesProjectedRecord.getString(1));
+        assertEquals(objectProjected.getInt32(3), bytesProjectedRecord.getInt32(3));
+    }
 }

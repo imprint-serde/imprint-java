@@ -1,15 +1,14 @@
-namespace com.imprint.benchmark;
+namespace com.imprint.benchmark.flatbuffers;
 
-table TestRecordFB {
-  id: int;
-  name: string;
-  price: double;
+table TestRecord {
+  id: string;
+  timestamp: long;
+  flags: int;
   active: bool;
-  category: string;
-  tags: [string];
-  metadata_keys: [string];
-  metadata_values: [string];
-  extra_data: [string];
+  value: double;
+  data: [ubyte];
+  tags: [int];
+  metadata: [string]; // Representing map as a flat list of key/value strings for simplicity
 }
 
-root_type TestRecordFB;
+root_type TestRecord;
