@@ -8,11 +8,11 @@ import static org.assertj.core.api.Assertions.*;
 class MapKeyTest {
     
     @Test
-    void shouldCreateMapKeysFromValues() throws ImprintException {
-        var int32Key = MapKey.fromValue(Value.fromInt32(42));
-        var int64Key = MapKey.fromValue(Value.fromInt64(123L));
-        var bytesKey = MapKey.fromValue(Value.fromBytes(new byte[]{1, 2, 3}));
-        var stringKey = MapKey.fromValue(Value.fromString("test"));
+    void shouldCreateMapKeysFromPrimitives() throws ImprintException {
+        var int32Key = MapKey.fromPrimitive(TypeCode.INT32, 42);
+        var int64Key = MapKey.fromPrimitive(TypeCode.INT64, 123L);
+        var bytesKey = MapKey.fromPrimitive(TypeCode.BYTES, new byte[]{1, 2, 3});
+        var stringKey = MapKey.fromPrimitive(TypeCode.STRING, "test");
         
         assertThat(int32Key).isInstanceOf(MapKey.Int32Key.class);
         assertThat(((MapKey.Int32Key) int32Key).getValue()).isEqualTo(42);
@@ -28,31 +28,28 @@ class MapKeyTest {
     }
     
     @Test
-    void shouldConvertBackToValues() {
+    void shouldConvertToPrimitives() {
         var int32Key = MapKey.fromInt32(42);
         var stringKey = MapKey.fromString("test");
 
-        var int32Value = int32Key.toValue();
-        var stringValue = stringKey.toValue();
+        Object int32Value = int32Key.getPrimitiveValue();
+        Object stringValue = stringKey.getPrimitiveValue();
         
-        assertThat(int32Value).isInstanceOf(Value.Int32Value.class);
-        assertThat(((Value.Int32Value) int32Value).getValue()).isEqualTo(42);
+        assertThat(int32Value).isInstanceOf(Integer.class);
+        assertThat(int32Value).isEqualTo(42);
         
-        assertThat(stringValue).isInstanceOf(Value.StringValue.class);
-        assertThat(((Value.StringValue) stringValue).getValue()).isEqualTo("test");
+        assertThat(stringValue).isInstanceOf(String.class);
+        assertThat(stringValue).isEqualTo("test");
     }
     
     @Test
-    void shouldRejectInvalidValueTypes() {
-        var boolValue = Value.fromBoolean(true);
-        var arrayValue = Value.fromArray(java.util.Collections.emptyList());
-        
-        assertThatThrownBy(() -> MapKey.fromValue(boolValue))
+    void shouldRejectInvalidPrimitiveTypes() {
+        assertThatThrownBy(() -> MapKey.fromPrimitive(TypeCode.BOOL, true))
             .isInstanceOf(ImprintException.class)
             .extracting("errorType")
             .isEqualTo(ErrorType.TYPE_MISMATCH);
             
-        assertThatThrownBy(() -> MapKey.fromValue(arrayValue))
+        assertThatThrownBy(() -> MapKey.fromPrimitive(TypeCode.ARRAY, java.util.Collections.emptyList()))
             .isInstanceOf(ImprintException.class)
             .extracting("errorType")
             .isEqualTo(ErrorType.TYPE_MISMATCH);

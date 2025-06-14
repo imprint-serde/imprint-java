@@ -12,7 +12,7 @@ import java.util.stream.IntStream;
  * - Sort values in place and return without allocation (subsequently poisons the map)
  */
 final class ImprintFieldObjectMap<T> {
-    private static final int DEFAULT_CAPACITY = 512;
+    private static final int DEFAULT_CAPACITY = 64;
     private static final float LOAD_FACTOR = 0.75f;
     private static final short EMPTY_KEY = -1; // Reserved empty marker (field IDs are >= 0)
     

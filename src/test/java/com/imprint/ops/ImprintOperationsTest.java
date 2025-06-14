@@ -4,7 +4,6 @@ import com.imprint.core.Directory;
 import com.imprint.core.ImprintRecord;
 import com.imprint.core.SchemaId;
 import com.imprint.error.ImprintException;
-import com.imprint.types.Value;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -109,10 +108,17 @@ class ImprintOperationsTest {
             assertEquals(multiFieldRecord.getDirectory().size(), projected.getDirectory().size());
 
             for (Directory entry : multiFieldRecord.getDirectory()) {
-                Value originalValue = multiFieldRecord.getValue(entry.getId());
-                Value projectedValue = projected.getValue(entry.getId());
-                assertEquals(originalValue, projectedValue,
-                        "Field " + entry.getId() + " should have matching value");
+                Object originalValue = multiFieldRecord.getValue(entry.getId());
+                Object projectedValue = projected.getValue(entry.getId());
+                
+                // Handle byte arrays specially since they don't use content equality
+                if (originalValue instanceof byte[] && projectedValue instanceof byte[]) {
+                    assertArrayEquals((byte[]) originalValue, (byte[]) projectedValue,
+                            "Field " + entry.getId() + " byte array should have matching content");
+                } else {
+                    assertEquals(originalValue, projectedValue,
+                            "Field " + entry.getId() + " should have matching value");
+                }
             }
         }
 
@@ -298,9 +304,22 @@ class ImprintOperationsTest {
 
             // And values should be preserved
             for (Directory entry : multiFieldRecord.getDirectory()) {
-                Value originalValue = multiFieldRecord.getValue(entry.getId());
-                assertEquals(originalValue, merged1.getValue(entry.getId()));
-                assertEquals(originalValue, merged2.getValue(entry.getId()));
+                Object originalValue = multiFieldRecord.getValue(entry.getId());
+                Object merged1Value = merged1.getValue(entry.getId());
+                Object merged2Value = merged2.getValue(entry.getId());
+                
+                // Handle byte arrays specially since they don't use content equality
+                if (originalValue instanceof byte[]) {
+                    assertArrayEquals((byte[]) originalValue, (byte[]) merged1Value,
+                            "Field " + entry.getId() + " should be preserved in merged1");
+                    assertArrayEquals((byte[]) originalValue, (byte[]) merged2Value,
+                            "Field " + entry.getId() + " should be preserved in merged2");
+                } else {
+                    assertEquals(originalValue, merged1Value,
+                            "Field " + entry.getId() + " should be preserved in merged1");
+                    assertEquals(originalValue, merged2Value,
+                            "Field " + entry.getId() + " should be preserved in merged2");
+                }
             }
         }
 

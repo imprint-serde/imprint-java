@@ -35,44 +35,44 @@ public abstract class MapKey {
         return new StringKey(value);
     }
     
-    public static MapKey fromValue(Value value) throws ImprintException {
-        switch (value.getTypeCode()) {
+    /**
+     * Create MapKey from primitive object and type code (optimized, no Value objects).
+     */
+    public static MapKey fromPrimitive(TypeCode typeCode, Object primitiveValue) throws ImprintException {
+        switch (typeCode) {
             case INT32:
-                return fromInt32(((Value.Int32Value) value).getValue());
+                return fromInt32((Integer) primitiveValue);
             case INT64:
-                return fromInt64(((Value.Int64Value) value).getValue());
+                return fromInt64((Long) primitiveValue);
             case BYTES:
-                if (value instanceof Value.BytesBufferValue) {
-                    return fromBytes(((Value.BytesBufferValue) value).getValue());
-                } else {
-                    return fromBytes(((Value.BytesValue) value).getValue());
-                }
+                return fromBytes((byte[]) primitiveValue);
             case STRING:
-                if (value instanceof Value.StringBufferValue) {
-                    return fromString(((Value.StringBufferValue) value).getValue());
-                } else {
-                    return fromString(((Value.StringValue) value).getValue());
-                }
+                return fromString((String) primitiveValue);
             default:
                 throw new ImprintException(ErrorType.TYPE_MISMATCH, 
-                    "Cannot convert " + value.getTypeCode() + " to MapKey");
+                    "Cannot convert " + typeCode + " to MapKey");
         }
     }
     
-    public Value toValue() {
+    
+    /**
+     * Get the primitive value as Object (optimized, no Value objects).
+     */
+    public Object getPrimitiveValue() {
         switch (getTypeCode()) {
             case INT32:
-                return Value.fromInt32(((Int32Key) this).getValue());
+                return ((Int32Key) this).getValue();
             case INT64:
-                return Value.fromInt64(((Int64Key) this).getValue());
+                return ((Int64Key) this).getValue();
             case BYTES:
-                return Value.fromBytes(((BytesKey) this).getValue());
+                return ((BytesKey) this).getValue();
             case STRING:
-                return Value.fromString(((StringKey) this).getValue());
+                return ((StringKey) this).getValue();
             default:
                 throw new IllegalStateException("Unknown MapKey type: " + getTypeCode());
         }
     }
+    
     
     @Getter
     @EqualsAndHashCode(callSuper = false)
