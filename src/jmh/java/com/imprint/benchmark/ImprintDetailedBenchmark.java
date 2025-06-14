@@ -75,12 +75,6 @@ public class ImprintDetailedBenchmark {
     }
 
     @Benchmark
-    public void serializeToBuffer(Blackhole bh) {
-        // Benchmark: Record → Bytes (just buffer copy)
-        bh.consume(preBuiltRecord.serializeToBuffer());
-    }
-
-    @Benchmark
     public void fullPipeline(Blackhole bh) {
         // Benchmark: POJO → Builder → Bytes (complete pipeline)
         try {

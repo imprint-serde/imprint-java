@@ -7,6 +7,11 @@ import lombok.experimental.UtilityClass;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
+import com.imprint.util.ImprintBuffer;
 
 /**
  * Static serialization methods for all Imprint types.
@@ -48,9 +53,9 @@ public final class ImprintSerializers {
         buffer.put(value);
     }
     
-    public static void serializeArray(java.util.List<?> list, ByteBuffer buffer, 
-                                     java.util.function.Function<Object, TypeCode> typeConverter,
-                                     java.util.function.BiConsumer<Object, ByteBuffer> elementSerializer) throws ImprintException {
+    public static void serializeArray(List<?> list, ByteBuffer buffer,
+                                      Function<Object, TypeCode> typeConverter,
+                                      BiConsumer<Object, ByteBuffer> elementSerializer) throws ImprintException {
         VarInt.encode(list.size(), buffer);
         
         if (list.isEmpty()) return; // Empty arrays don't need type code
@@ -71,10 +76,8 @@ public final class ImprintSerializers {
         }
     }
     
-    public static void serializeMap(java.util.Map<?, ?> map, ByteBuffer buffer,
-                                   java.util.function.Function<Object, MapKey> keyConverter,
-                                   java.util.function.Function<Object, TypeCode> typeConverter,
-                                   java.util.function.BiConsumer<Object, ByteBuffer> valueSerializer) throws ImprintException {
+    public static void serializeMap(Map<?, ?> map, ByteBuffer buffer, Function<Object, MapKey> keyConverter,
+                                    Function<Object, TypeCode> typeConverter, BiConsumer<Object, ByteBuffer> valueSerializer) throws ImprintException {
         VarInt.encode(map.size(), buffer);
         
         if (map.isEmpty()) return;
@@ -140,6 +143,129 @@ public final class ImprintSerializers {
 
     @SuppressWarnings("unused")
     public static void serializeNull(ByteBuffer buffer) {
+        // NULL values have no payload data
+    }
+
+    // ========== IMPRINTBUFFER OVERLOADS ==========
+    
+    // Primitive serializers - ImprintBuffer overloads
+    public static void serializeBool(boolean value, ImprintBuffer buffer) {
+        buffer.putByte((byte) (value ? 1 : 0));
+    }
+    
+    public static void serializeInt32(int value, ImprintBuffer buffer) {
+        buffer.putInt(value);
+    }
+    
+    public static void serializeInt64(long value, ImprintBuffer buffer) {
+        buffer.putLong(value);
+    }
+    
+    public static void serializeFloat32(float value, ImprintBuffer buffer) {
+        buffer.putFloat(value);
+    }
+    
+    public static void serializeFloat64(double value, ImprintBuffer buffer) {
+        buffer.putDouble(value);
+    }
+    
+    public static void serializeString(String value, ImprintBuffer buffer) {
+        buffer.putString(value);
+    }
+    
+    public static void serializeBytes(byte[] value, ImprintBuffer buffer) {
+        buffer.putVarInt(value.length);
+        buffer.putBytes(value);
+    }
+    
+    public static void serializeArray(List<?> list, ImprintBuffer buffer,
+                                      Function<Object, TypeCode> typeConverter,
+                                      BiConsumer<Object, ImprintBuffer> elementSerializer) throws ImprintException {
+        buffer.putVarInt(list.size());
+        
+        if (list.isEmpty()) return; // Empty arrays don't need type code
+
+        // Convert first element to determine element type
+        Object firstElement = list.get(0);
+        TypeCode firstTypeCode = typeConverter.apply(firstElement);
+        buffer.putByte(firstTypeCode.getCode());
+        
+        // Serialize all elements - they must be same type
+        for (Object element : list) {
+            TypeCode elementTypeCode = typeConverter.apply(element);
+            if (elementTypeCode != firstTypeCode) {
+                throw new ImprintException(ErrorType.SCHEMA_ERROR,
+                        "Array elements must have same type");
+            }
+            elementSerializer.accept(element, buffer);
+        }
+    }
+    
+    public static void serializeMap(Map<?, ?> map, ImprintBuffer buffer, Function<Object, MapKey> keyConverter,
+                                    Function<Object, TypeCode> typeConverter, BiConsumer<Object, ImprintBuffer> valueSerializer) throws ImprintException {
+        buffer.putVarInt(map.size());
+        
+        if (map.isEmpty()) return;
+        
+        var iterator = map.entrySet().iterator();
+        var first = iterator.next();
+        
+        // Convert key and value to determine types
+        MapKey firstKey = keyConverter.apply(first.getKey());
+        TypeCode firstValueType = typeConverter.apply(first.getValue());
+        
+        buffer.putByte(firstKey.getTypeCode().getCode());
+        buffer.putByte(firstValueType.getCode());
+        
+        // Serialize first pair
+        serializeMapKeyDirect(firstKey, buffer);
+        valueSerializer.accept(first.getValue(), buffer);
+        
+        // Serialize remaining pairs
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            MapKey key = keyConverter.apply(entry.getKey());
+            TypeCode valueType = typeConverter.apply(entry.getValue());
+            
+            if (key.getTypeCode() != firstKey.getTypeCode()) {
+                throw new ImprintException(ErrorType.SCHEMA_ERROR,
+                        "Map keys must have same type");
+            }
+            if (valueType != firstValueType) {
+                throw new ImprintException(ErrorType.SCHEMA_ERROR,
+                        "Map values must have same type");
+            }
+            
+            serializeMapKeyDirect(key, buffer);
+            valueSerializer.accept(entry.getValue(), buffer);
+        }
+    }
+    
+    private static void serializeMapKeyDirect(MapKey key, ImprintBuffer buffer) throws ImprintException {
+        switch (key.getTypeCode()) {
+            case INT32:
+                buffer.putInt(((MapKey.Int32Key) key).getValue());
+                break;
+            case INT64:
+                buffer.putLong(((MapKey.Int64Key) key).getValue());
+                break;
+            case BYTES:
+                byte[] bytes = ((MapKey.BytesKey) key).getValue();
+                buffer.putVarInt(bytes.length);
+                buffer.putBytes(bytes);
+                break;
+            case STRING:
+                String str = ((MapKey.StringKey) key).getValue();
+                buffer.putString(str);
+                break;
+            default:
+                throw new ImprintException(ErrorType.SERIALIZATION_ERROR,
+                        "Invalid map key type: " + key.getTypeCode());
+        }
+    }
+
+    @SuppressWarnings("unused")
+    public static void serializeNull(ImprintBuffer buffer) {
         // NULL values have no payload data
     }
 

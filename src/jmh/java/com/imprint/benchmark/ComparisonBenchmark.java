@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
 @Warmup(iterations = 3, time = 1)
-@Measurement(iterations = 25, time = 1)
+@Measurement(iterations = 7, time = 1)
 @Fork(value = 1, jvmArgs = {"-Xms4g", "-Xmx4g"})
 public class ComparisonBenchmark {
 
@@ -30,7 +30,7 @@ public class ComparisonBenchmark {
             new KryoSerializingBenchmark(),
             new MessagePackSerializingBenchmark());
 
-    @Param({"Imprint"})
+    @Param({"Imprint", "Jackson-JSON", "Protobuf", "FlatBuffers", "Avro-Generic", "Thrift", "Kryo", "MessagePack", ""})
     public String framework;
 
     private SerializingBenchmark serializingBenchmark;
@@ -50,7 +50,7 @@ public class ComparisonBenchmark {
         serializingBenchmark.setup(testRecord1, testRecord2);
     }
 
-    @Benchmark
+    //@Benchmark
     public void serialize(Blackhole bh) {
         serializingBenchmark.serialize(bh);
     }
@@ -65,7 +65,7 @@ public class ComparisonBenchmark {
         serializingBenchmark.projectAndSerialize(bh);
     }
 
-    //@Benchmark
+    @Benchmark
     public void mergeAndSerialize(Blackhole bh) {
         serializingBenchmark.mergeAndSerialize(bh);
     }
