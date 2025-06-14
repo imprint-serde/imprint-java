@@ -1,6 +1,5 @@
 package com.imprint.benchmark;
 
-import com.imprint.benchmark.serializers.ImprintSerializingBenchmark;
 import com.imprint.core.ImprintRecord;
 import com.imprint.core.ImprintRecordBuilder;
 import com.imprint.core.SchemaId;
@@ -21,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
 @Warmup(iterations = 3, time = 1)
-@Measurement(iterations = 15, time = 1)
+@Measurement(iterations = 20, time = 1)
 @Fork(value = 1, jvmArgs = {"-Xms4g", "-Xmx4g"})
 public class ImprintDetailedBenchmark {
 
@@ -42,7 +41,7 @@ public class ImprintDetailedBenchmark {
     }
 
     private ImprintRecordBuilder buildRecord(DataGenerator.TestRecord pojo) {
-        var builder = ImprintRecord.builder(SCHEMA_ID);
+        var builder = ImprintRecord.builder(SCHEMA_ID, 8); // Pre-size for 8 fields
         builder.field(0, pojo.id);
         builder.field(1, pojo.timestamp);
         builder.field(2, pojo.flags);

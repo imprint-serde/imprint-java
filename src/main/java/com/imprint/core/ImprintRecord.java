@@ -4,8 +4,7 @@ import com.imprint.Constants;
 import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import com.imprint.ops.ImprintOperations;
-import com.imprint.types.TypeCode;
-import com.imprint.types.Value;
+import com.imprint.types.*;
 import com.imprint.util.VarInt;
 
 import lombok.AccessLevel;
@@ -70,6 +69,15 @@ public class ImprintRecord {
      */
     public static ImprintRecordBuilder builder(SchemaId schemaId) {
         return new ImprintRecordBuilder(schemaId);
+    }
+
+    /**
+     * Create a pre-sized builder for constructing new ImprintRecord instances.
+     * @param schemaId Schema identifier
+     * @param expectedFieldCount Expected number of fields to optimize memory allocation
+     */
+    public static ImprintRecordBuilder builder(SchemaId schemaId, int expectedFieldCount) {
+        return new ImprintRecordBuilder(schemaId, expectedFieldCount);
     }
 
     public static ImprintRecordBuilder builder(int fieldspaceId, int schemaHash) {
@@ -177,17 +185,17 @@ public class ImprintRecord {
     }
 
     /**
-     * Get a field value by ID.
+     * Get a field value by ID as Object.
      * Uses zero-copy binary search to locate the field.
      */
-    public Value getValue(int fieldId) throws ImprintException {
+    public Object getValue(int fieldId) throws ImprintException {
         var entry = getDirectoryView().findEntry(fieldId);
         if (entry == null) return null;
 
         var fieldBuffer = getFieldBuffer(fieldId);
         if (fieldBuffer == null) return null;
 
-        return deserializeValue(entry.getTypeCode(), fieldBuffer);
+        return deserializePrimitive(entry.getTypeCode(), fieldBuffer);
     }
 
     /**
@@ -207,53 +215,45 @@ public class ImprintRecord {
     // ========== TYPED GETTERS ==========
 
     public String getString(int fieldId) throws ImprintException {
-        var value = getValidatedValue(fieldId, "STRING");
-        if (value instanceof Value.StringValue)
-            return ((Value.StringValue) value).getValue();
-        if (value instanceof Value.StringBufferValue)
-            return ((Value.StringBufferValue) value).getValue();
-        throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is not a STRING");
+        return (String) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.STRING, "STRING");
     }
 
     public int getInt32(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, com.imprint.types.TypeCode.INT32, Value.Int32Value.class, "int32").getValue();
+        return (Integer) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.INT32, "INT32");
     }
 
     public long getInt64(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, com.imprint.types.TypeCode.INT64, Value.Int64Value.class, "int64").getValue();
+        return (Long) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.INT64, "INT64");
     }
 
     public boolean getBoolean(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, com.imprint.types.TypeCode.BOOL, Value.BoolValue.class, "boolean").getValue();
+        return (Boolean) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.BOOL, "BOOL");
     }
 
     public float getFloat32(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, com.imprint.types.TypeCode.FLOAT32, Value.Float32Value.class, "float32").getValue();
+        return (Float) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.FLOAT32, "FLOAT32");
     }
 
     public double getFloat64(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, com.imprint.types.TypeCode.FLOAT64, Value.Float64Value.class, "float64").getValue();
+        return (Double) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.FLOAT64, "FLOAT64");
     }
 
     public byte[] getBytes(int fieldId) throws ImprintException {
-        var value = getValidatedValue(fieldId, "BYTES");
-        if (value instanceof Value.BytesValue)
-            return ((Value.BytesValue) value).getValue();
-        if (value instanceof Value.BytesBufferValue)
-            return ((Value.BytesBufferValue) value).getValue();
-        throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is not BYTES");
+        return (byte[]) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.BYTES, "BYTES");
     }
 
-    public java.util.List<Value> getArray(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, com.imprint.types.TypeCode.ARRAY, Value.ArrayValue.class, "ARRAY").getValue();
+    @SuppressWarnings("unchecked")
+    public <T> java.util.List<T> getArray(int fieldId) throws ImprintException {
+        return (java.util.List<T>) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.ARRAY, "ARRAY");
     }
 
-    public java.util.Map<com.imprint.types.MapKey, Value> getMap(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, com.imprint.types.TypeCode.MAP, Value.MapValue.class, "MAP").getValue();
+    @SuppressWarnings("unchecked")
+    public <K, V> java.util.Map<K, V> getMap(int fieldId) throws ImprintException {
+        return (java.util.Map<K, V>) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.MAP, "MAP");
     }
 
     public ImprintRecord getRow(int fieldId) throws ImprintException {
-        return getTypedValueOrThrow(fieldId, com.imprint.types.TypeCode.ROW, Value.RowValue.class, "ROW").getValue();
+        return (ImprintRecord) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.ROW, "ROW");
     }
 
     /**
@@ -279,23 +279,24 @@ public class ImprintRecord {
 
 
     /**
-     * Get and validate a value exists and is not null.
+     * Get and validate a field exists, is not null, and has the expected type.
      */
-    private Value getValidatedValue(int fieldId, String typeName) throws ImprintException {
-        var value = getValue(fieldId);
-        if (value == null)
+    private Object getTypedPrimitive(int fieldId, com.imprint.types.TypeCode expectedTypeCode, String typeName) throws ImprintException {
+        var entry = getDirectoryView().findEntry(fieldId);
+        if (entry == null)
             throw new ImprintException(ErrorType.FIELD_NOT_FOUND, "Field " + fieldId + " not found");
-        if (value.getTypeCode() == com.imprint.types.TypeCode.NULL)
+            
+        if (entry.getTypeCode() == com.imprint.types.TypeCode.NULL)
             throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is NULL, cannot retrieve as " + typeName);
-        return value;
-    }
+            
+        if (entry.getTypeCode() != expectedTypeCode)
+            throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is of type " + entry.getTypeCode() + ", expected " + typeName);
 
-    private <T extends Value> T getTypedValueOrThrow(int fieldId, com.imprint.types.TypeCode expectedTypeCode, Class<T> expectedValueClass, String expectedTypeName)
-            throws ImprintException {
-        var value = getValidatedValue(fieldId, expectedTypeName);
-        if (value.getTypeCode() == expectedTypeCode && expectedValueClass.isInstance(value))
-            return expectedValueClass.cast(value);
-        throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is of type " + value.getTypeCode() + ", expected " + expectedTypeName);
+        var fieldBuffer = getFieldBuffer(fieldId);
+        if (fieldBuffer == null)
+            throw new ImprintException(ErrorType.FIELD_NOT_FOUND, "Field " + fieldId + " buffer not found");
+
+        return deserializePrimitive(entry.getTypeCode(), fieldBuffer);
     }
 
     /**
@@ -516,36 +517,6 @@ public class ImprintRecord {
         }
     }
 
-    static void writeDirectoryToBuffer(short[] sortedKeys, Object[] sortedValues, int[] offsets, int fieldCount, ByteBuffer buffer) {
-        // Optimize VarInt encoding for common case (< 128 fields = single byte)
-        if (fieldCount < 128) {
-            buffer.put((byte) fieldCount);
-        } else {
-            VarInt.encode(fieldCount, buffer);
-        }
-        
-        // Early return for empty directory
-        if (fieldCount == 0) {
-            return;
-        }
-        
-        // Tight loop optimization: minimize method calls and casts
-        for (int i = 0; i < fieldCount; i++) {
-            var entry = (ImprintRecordBuilder.ValueWithType) sortedValues[i];
-            
-            // Get current position once, then batch write
-            int pos = buffer.position();
-            
-            // Write all 7 bytes for this entry in sequence
-            buffer.putShort(pos, sortedKeys[i]);           // bytes 0-1: field ID  
-            buffer.put(pos + 2, entry.typeCode);    // byte 2: type code
-            buffer.putInt(pos + 3, offsets[i]);     // bytes 3-6: offset
-            
-            // Advance buffer position by 7 bytes
-            buffer.position(pos + 7);
-        }
-    }
-
     /**
      * Parse a header from a ByteBuffer without advancing the buffer position.
      * Utility method shared between {@link ImprintRecord} and {@link ImprintOperations}.
@@ -629,7 +600,7 @@ public class ImprintRecord {
         return new Header(flags, new SchemaId(fieldSpaceId, schemaHash), payloadSize);
     }
 
-    private Value deserializeValue(com.imprint.types.TypeCode typeCode, ByteBuffer buffer) throws ImprintException {
+    private Object deserializePrimitive(com.imprint.types.TypeCode typeCode, ByteBuffer buffer) throws ImprintException {
         var valueBuffer = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
         switch (typeCode) {
             case NULL:
@@ -640,14 +611,81 @@ public class ImprintRecord {
             case FLOAT64:
             case BYTES:
             case STRING:
+                return ImprintDeserializers.deserializePrimitive(valueBuffer, typeCode);
             case ARRAY:
+                return deserializePrimitiveArray(valueBuffer);
             case MAP:
-                return typeCode.getHandler().deserialize(valueBuffer);
+                return deserializePrimitiveMap(valueBuffer);
             case ROW:
-                var nestedRecord = deserialize(valueBuffer);
-                return Value.fromRow(nestedRecord);
+                return deserialize(valueBuffer);
             default:
                 throw new ImprintException(ErrorType.INVALID_TYPE_CODE, "Unknown type code: " + typeCode);
         }
+    }
+
+    private java.util.List<Object> deserializePrimitiveArray(ByteBuffer buffer) throws ImprintException {
+        VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
+        int length = lengthResult.getValue();
+
+        if (length == 0) {
+            return java.util.Collections.emptyList();
+        }
+
+        if (buffer.remaining() < 1) {
+            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for ARRAY element type code.");
+        }
+        var elementType = TypeCode.fromByte(buffer.get());
+        var elements = new ArrayList<>(length);
+
+        for (int i = 0; i < length; i++) {
+            Object element;
+            if (elementType == TypeCode.ARRAY) {
+                element = deserializePrimitiveArray(buffer);
+            } else if (elementType == TypeCode.MAP) {
+                element = deserializePrimitiveMap(buffer);
+            } else if (elementType == TypeCode.ROW) {
+                element = deserialize(buffer);
+            } else {
+                element = ImprintDeserializers.deserializePrimitive(buffer, elementType);
+            }
+            elements.add(element);
+        }
+
+        return elements;
+    }
+
+    private java.util.Map<Object, Object> deserializePrimitiveMap(ByteBuffer buffer) throws ImprintException {
+        VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
+        int length = lengthResult.getValue();
+
+        if (length == 0) {
+            return java.util.Collections.emptyMap();
+        }
+
+        if (buffer.remaining() < 2) {
+            throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for MAP key/value type codes.");
+        }
+        var keyType = TypeCode.fromByte(buffer.get());
+        var valueType = TypeCode.fromByte(buffer.get());
+        var map = new java.util.HashMap<>(length);
+
+        for (int i = 0; i < length; i++) {
+            var keyPrimitive = ImprintDeserializers.deserializePrimitive(buffer, keyType);
+            
+            Object valuePrimitive;
+            if (valueType == TypeCode.ARRAY) {
+                valuePrimitive = deserializePrimitiveArray(buffer);
+            } else if (valueType == TypeCode.MAP) {
+                valuePrimitive = deserializePrimitiveMap(buffer);
+            } else if (valueType == TypeCode.ROW) {
+                valuePrimitive = deserialize(buffer);
+            } else {
+                valuePrimitive = ImprintDeserializers.deserializePrimitive(buffer, valueType);
+            }
+            
+            map.put(keyPrimitive, valuePrimitive);
+        }
+
+        return map;
     }
 }

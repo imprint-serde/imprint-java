@@ -2,10 +2,7 @@ package com.imprint.util;
 
 import com.imprint.error.ImprintException;
 import com.imprint.error.ErrorType;
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import lombok.*;
 import lombok.experimental.UtilityClass;
 
 import java.nio.ByteBuffer;
@@ -46,14 +43,12 @@ public final class VarInt {
     public static void encode(int value, ByteBuffer buffer) {
         // Convert to unsigned long for proper bit manipulation
         long val = Integer.toUnsignedLong(value);
-
         // Encode at least one byte, then continue while value has more bits
         do {
             byte b = (byte) (val & SEGMENT_BITS);
             val >>>= 7;
-            if (val != 0) {
+            if (val != 0)
                 b |= CONTINUATION_BIT;
-            }
             buffer.put(b);
         } while (val != 0);
     }
@@ -80,18 +75,14 @@ public final class VarInt {
 
             // Check if adding these 7 bits would overflow
             long segment = b & SEGMENT_BITS;
-            if (shift >= 32 || (shift == 28 && segment > 0xF)) {
+            if (shift >= 32 || (shift == 28 && segment > 0xF))
                 throw new ImprintException(ErrorType.MALFORMED_VARINT, "VarInt overflow");
-            }
-
             // Add the bottom 7 bits to the result
             result |= segment << shift;
 
             // If the high bit is not set, this is the last byte
-            if ((b & CONTINUATION_BIT) == 0) {
+            if ((b & CONTINUATION_BIT) == 0)
                 break;
-            }
-
             shift += 7;
         }
 
@@ -104,10 +95,8 @@ public final class VarInt {
      * @return the number of bytes needed
      */
     public static int encodedLength(int value) {
-        if (value >= 0 && value < CACHE_SIZE) {
+        if (value >= 0 && value < CACHE_SIZE)
             return ENCODED_LENGTHS[value];
-        }
-
         long val = Integer.toUnsignedLong(value);
         int length = 1;
         while (val >= 0x80) {
@@ -120,12 +109,9 @@ public final class VarInt {
     /**
      * Result of a VarInt decode operation.
      */
-    @Getter
-    @AllArgsConstructor
-    @EqualsAndHashCode
-    @ToString
+    @Value
     public static class DecodeResult {
-        private final int value;
-        private final int bytesRead;
+        int value;
+        int bytesRead;
     }
 }

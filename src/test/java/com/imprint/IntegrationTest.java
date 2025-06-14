@@ -75,19 +75,19 @@ public class IntegrationTest {
         ImprintRecord deserialized = ImprintRecord.deserialize(serialized);
 
         // Verify array
-        List<Value> deserializedArray = deserialized.getArray(1);
+        List<Integer> deserializedArray = deserialized.getArray(1);
         assertNotNull(deserializedArray);
         assertEquals(3, deserializedArray.size());
-        assertEquals(Value.fromInt32(1), deserializedArray.get(0));
-        assertEquals(Value.fromInt32(2), deserializedArray.get(1));
-        assertEquals(Value.fromInt32(3), deserializedArray.get(2));
+        assertEquals(Integer.valueOf(1), deserializedArray.get(0));
+        assertEquals(Integer.valueOf(2), deserializedArray.get(1));
+        assertEquals(Integer.valueOf(3), deserializedArray.get(2));
 
         // Verify map
-        Map<MapKey, Value> deserializedMap = deserialized.getMap(2);
+        Map<String, Integer> deserializedMap = deserialized.getMap(2);
         assertNotNull(deserializedMap);
         assertEquals(2, deserializedMap.size());
-        assertEquals(Value.fromInt32(1), deserializedMap.get(MapKey.fromString("one")));
-        assertEquals(Value.fromInt32(2), deserializedMap.get(MapKey.fromString("two")));
+        assertEquals(Integer.valueOf(1), deserializedMap.get("one"));
+        assertEquals(Integer.valueOf(2), deserializedMap.get("two"));
     }
 
     @Test
@@ -168,18 +168,18 @@ public class IntegrationTest {
                 .field(100, "nested value")
                 .build();
 
-        // Create homogeneous array (all strings)
-        var testArray = Arrays.asList(Value.fromString("item1"), Value.fromString("item2"), Value.fromString("item3"));
+        // Create homogeneous array (all strings) - builder will handle conversion
+        var testArray = Arrays.asList("item1", "item2", "item3");
 
-        // Create homogeneous map (string keys -> string values)
-        var testMap = new HashMap<MapKey, Value>();
-        testMap.put(MapKey.fromString("key1"), Value.fromString("value1"));
-        testMap.put(MapKey.fromString("key2"), Value.fromString("value2"));
+        // Create homogeneous map (string keys -> string values) - builder will handle conversion
+        var testMap = new HashMap<String, String>();
+        testMap.put("key1", "value1");
+        testMap.put("key2", "value2");
 
         var originalRecord = ImprintRecord.builder(schemaId)
                 .field(1, "simple string")
-                .field(2, Value.fromArray(testArray))
-                .field(3, Value.fromMap(testMap))
+                .field(2, testArray)
+                .field(3, testMap)
                 .field(4, nestedRecord)
                 .field(5, 999L)
                 .build();
@@ -192,15 +192,15 @@ public class IntegrationTest {
         // Verify array projection (homogeneous strings)
         var projectedArray = projected.getArray(2);
         assertEquals(3, projectedArray.size());
-        assertEquals(Value.fromString("item1"), projectedArray.get(0));
-        assertEquals(Value.fromString("item2"), projectedArray.get(1));
-        assertEquals(Value.fromString("item3"), projectedArray.get(2));
+        assertEquals("item1", projectedArray.get(0));
+        assertEquals("item2", projectedArray.get(1));
+        assertEquals("item3", projectedArray.get(2));
 
         // Verify map projection (string -> string)
         var projectedMap = projected.getMap(3);
         assertEquals(2, projectedMap.size());
-        assertEquals(Value.fromString("value1"), projectedMap.get(MapKey.fromString("key1")));
-        assertEquals(Value.fromString("value2"), projectedMap.get(MapKey.fromString("key2")));
+        assertEquals("value1", projectedMap.get("key1"));
+        assertEquals("value2", projectedMap.get("key2"));
 
         // Verify nested record projection
         var projectedNested = projected.getRow(4);
@@ -294,27 +294,27 @@ public class IntegrationTest {
                 .field(200, "nested in record2")
                 .build();
 
-        // Create arrays
-        var array1 = Arrays.asList(Value.fromString("array1_item1"), Value.fromString("array1_item2"));
-        var array2 = Arrays.asList(Value.fromInt32(10), Value.fromInt32(20));
+        // Create arrays - builder will handle conversion
+        var array1 = Arrays.asList("array1_item1", "array1_item2");
+        var array2 = Arrays.asList(10, 20);
 
-        // Create maps
-        var map1 = new HashMap<MapKey, Value>();
-        map1.put(MapKey.fromString("map1_key"), Value.fromString("map1_value"));
+        // Create maps - builder will handle conversion
+        var map1 = new HashMap<String, String>();
+        map1.put("map1_key", "map1_value");
 
-        var map2 = new HashMap<MapKey, Value>();
-        map2.put(MapKey.fromInt32(42), Value.fromBoolean(true));
+        var map2 = new HashMap<Integer, Boolean>();
+        map2.put(42, true);
 
         var record1 = ImprintRecord.builder(schemaId)
                 .field(1, nested1)
-                .field(3, Value.fromArray(array1))
-                .field(5, Value.fromMap(map1))
+                .field(3, array1)
+                .field(5, map1)
                 .build();
 
         var record2 = ImprintRecord.builder(schemaId)
                 .field(2, nested2)
-                .field(4, Value.fromArray(array2))
-                .field(6, Value.fromMap(map2))
+                .field(4, array2)
+                .field(6, map2)
                 .build();
 
         var merged = record1.merge(record2);
@@ -331,18 +331,18 @@ public class IntegrationTest {
         // Verify arrays
         var mergedArray1 = merged.getArray(3);
         assertEquals(2, mergedArray1.size());
-        assertEquals(Value.fromString("array1_item1"), mergedArray1.get(0));
+        assertEquals("array1_item1", mergedArray1.get(0));
 
         var mergedArray2 = merged.getArray(4);
         assertEquals(2, mergedArray2.size());
-        assertEquals(Value.fromInt32(10), mergedArray2.get(0));
+        assertEquals(10, mergedArray2.get(0));
 
         // Verify maps
         var mergedMap1 = merged.getMap(5);
-        assertEquals(Value.fromString("map1_value"), mergedMap1.get(MapKey.fromString("map1_key")));
+        assertEquals("map1_value", mergedMap1.get("map1_key"));
 
         var mergedMap2 = merged.getMap(6);
-        assertEquals(Value.fromBoolean(true), mergedMap2.get(MapKey.fromInt32(42)));
+        assertEquals(true, mergedMap2.get(42));
     }
 
     @Test
@@ -465,12 +465,14 @@ public class IntegrationTest {
     private ImprintRecord createTestRecordForGetters() throws ImprintException {
         SchemaId schemaId = new SchemaId(5, 0xabcdef01);
 
-        List<Value> innerList1 = Arrays.asList(Value.fromInt32(10), Value.fromInt32(20));
-        List<Value> innerList2 = Arrays.asList(Value.fromInt32(30), Value.fromInt32(40));
-        List<Value> listOfLists = Arrays.asList(Value.fromArray(innerList1), Value.fromArray(innerList2));
+        // Create nested arrays - builder will handle conversion
+        List<Integer> innerList1 = Arrays.asList(10, 20);
+        List<Integer> innerList2 = Arrays.asList(30, 40);
+        List<List<Integer>> listOfLists = Arrays.asList(innerList1, innerList2);
 
-        Map<MapKey, Value> mapWithArrayValue = new HashMap<>();
-        mapWithArrayValue.put(MapKey.fromString("list1"), Value.fromArray(innerList1));
+        // Create map with array value - builder will handle conversion  
+        Map<String, List<Integer>> mapWithArrayValue = new HashMap<>();
+        mapWithArrayValue.put("list1", innerList1);
 
         return ImprintRecord.builder(schemaId)
                 .field(1, true)
@@ -481,8 +483,8 @@ public class IntegrationTest {
                 .field(6, "hello type world")
                 .field(7, new byte[]{10, 20, 30})
                 .nullField(8)
-                .field(9, Value.fromArray(listOfLists))     // Array of Arrays (using Value directly for test setup)
-                .field(10, Value.fromMap(mapWithArrayValue)) // Map with Array value
+                .field(9, listOfLists)     // Array of Arrays - builder handles conversion
+                .field(10, mapWithArrayValue) // Map with Array value - builder handles conversion
                 .field(11, Collections.emptyList())          // Empty Array via builder
                 .field(12, Collections.emptyMap())           // Empty Map via builder
                 .build();
@@ -516,20 +518,21 @@ public class IntegrationTest {
         var originalRecord = createTestRecordForGetters();
         var record = serializeAndDeserialize(originalRecord);
 
-        List<Value> arrOfArr = record.getArray(9);
+        List<List<Integer>> arrOfArr = record.getArray(9);
         assertNotNull(arrOfArr);
         assertEquals(2, arrOfArr.size());
-        assertInstanceOf(Value.ArrayValue.class, arrOfArr.get(0));
-        Value.ArrayValue firstInnerArray = (Value.ArrayValue) arrOfArr.get(0);
-        assertEquals(2, firstInnerArray.getValue().size());
-        assertEquals(Value.fromInt32(10), firstInnerArray.getValue().get(0));
-        assertEquals(Value.fromInt32(20), firstInnerArray.getValue().get(1));
+        
+        List<Integer> firstInnerArray = arrOfArr.get(0);
+        assertNotNull(firstInnerArray);
+        assertEquals(2, firstInnerArray.size());
+        assertEquals(Integer.valueOf(10), firstInnerArray.get(0));
+        assertEquals(Integer.valueOf(20), firstInnerArray.get(1));
 
-        assertInstanceOf(Value.ArrayValue.class, arrOfArr.get(1));
-        Value.ArrayValue secondInnerArray = (Value.ArrayValue) arrOfArr.get(1);
-        assertEquals(2, secondInnerArray.getValue().size());
-        assertEquals(Value.fromInt32(30), secondInnerArray.getValue().get(0));
-        assertEquals(Value.fromInt32(40), secondInnerArray.getValue().get(1));
+        List<Integer> secondInnerArray = arrOfArr.get(1);
+        assertNotNull(secondInnerArray);
+        assertEquals(2, secondInnerArray.size());
+        assertEquals(Integer.valueOf(30), secondInnerArray.get(0));
+        assertEquals(Integer.valueOf(40), secondInnerArray.get(1));
     }
 
     @Test
@@ -538,14 +541,14 @@ public class IntegrationTest {
         var originalRecord = createTestRecordForGetters();
         var record = serializeAndDeserialize(originalRecord);
 
-        Map<MapKey, Value> mapWithArr = record.getMap(10);
+        Map<String, List<Integer>> mapWithArr = record.getMap(10);
         assertNotNull(mapWithArr);
         assertEquals(1, mapWithArr.size());
-        assertInstanceOf(Value.ArrayValue.class, mapWithArr.get(MapKey.fromString("list1")));
-        Value.ArrayValue innerArray = (Value.ArrayValue) mapWithArr.get(MapKey.fromString("list1"));
+        
+        List<Integer> innerArray = mapWithArr.get("list1");
         assertNotNull(innerArray);
-        assertEquals(2, innerArray.getValue().size());
-        assertEquals(Value.fromInt32(10), innerArray.getValue().get(0));
+        assertEquals(2, innerArray.size());
+        assertEquals(Integer.valueOf(10), innerArray.get(0));
     }
 
     @Test
@@ -554,11 +557,11 @@ public class IntegrationTest {
         var originalRecord = createTestRecordForGetters();
         var record = serializeAndDeserialize(originalRecord);
 
-        List<Value> emptyArr = record.getArray(11);
+        List<?> emptyArr = record.getArray(11);
         assertNotNull(emptyArr);
         assertTrue(emptyArr.isEmpty());
 
-        Map<MapKey, Value> emptyMap = record.getMap(12);
+        Map<?, ?> emptyMap = record.getMap(12);
         assertNotNull(emptyMap);
         assertTrue(emptyMap.isEmpty());
     }
@@ -584,10 +587,9 @@ public class IntegrationTest {
         assertTrue(ex.getMessage().contains("Field 8 is NULL"));
 
 
-        // Also test getValue for a null field returns Value.NullValue
-        Value nullValueField = record.getValue(8);
-        assertNotNull(nullValueField);
-        assertInstanceOf(Value.NullValue.class, nullValueField, "Field 8 should be Value.NullValue");
+        // Also test getValue for a null field returns null
+        Object nullValueField = record.getValue(8);
+        assertNull(nullValueField, "Field 8 should be null");
     }
 
     @Test
@@ -743,37 +745,49 @@ public class IntegrationTest {
     void testMapKeyTypeVariations() throws ImprintException {
         var schemaId = new SchemaId(70, 0xAAB5E75);
 
-        // Create maps with different key types
-        var stringKeyMap = new HashMap<MapKey, Value>();
-        stringKeyMap.put(MapKey.fromString("string_key"), Value.fromString("string_value"));
+        // Create maps with different key types - use simple types for builder  
+        var stringKeyMap = new HashMap<String, String>();
+        stringKeyMap.put("string_key", "string_value");
 
-        var intKeyMap = new HashMap<MapKey, Value>();
-        intKeyMap.put(MapKey.fromInt32(42), Value.fromString("int_value"));
+        var intKeyMap = new HashMap<Integer, String>();
+        intKeyMap.put(42, "int_value");
 
-        var longKeyMap = new HashMap<MapKey, Value>();
-        longKeyMap.put(MapKey.fromInt64(9876543210L), Value.fromString("long_value"));
+        var longKeyMap = new HashMap<Long, String>();
+        longKeyMap.put(9876543210L, "long_value");
 
-        var bytesKeyMap = new HashMap<MapKey, Value>();
-        bytesKeyMap.put(MapKey.fromBytes(new byte[]{1, 2, 3}), Value.fromString("bytes_value"));
+        var bytesKeyMap = new HashMap<byte[], String>();
+        bytesKeyMap.put(new byte[]{1, 2, 3}, "bytes_value");
 
         var record = ImprintRecord.builder(schemaId)
-                .field(1, Value.fromMap(stringKeyMap))
-                .field(2, Value.fromMap(intKeyMap))
-                .field(3, Value.fromMap(longKeyMap))
-                .field(4, Value.fromMap(bytesKeyMap))
+                .field(1, stringKeyMap)
+                .field(2, intKeyMap)
+                .field(3, longKeyMap)
+                .field(4, bytesKeyMap)
                 .build();
 
         var deserialized = serializeAndDeserialize(record);
 
         // Verify all map key types work correctly
-        assertEquals(Value.fromString("string_value"), 
-            deserialized.getMap(1).get(MapKey.fromString("string_key")));
-        assertEquals(Value.fromString("int_value"), 
-            deserialized.getMap(2).get(MapKey.fromInt32(42)));
-        assertEquals(Value.fromString("long_value"), 
-            deserialized.getMap(3).get(MapKey.fromInt64(9876543210L)));
-        assertEquals(Value.fromString("bytes_value"), 
-            deserialized.getMap(4).get(MapKey.fromBytes(new byte[]{1, 2, 3})));
+        assertEquals("string_value", 
+            deserialized.getMap(1).get("string_key"));
+        assertEquals("int_value", 
+            deserialized.getMap(2).get(42));
+        assertEquals("long_value", 
+            deserialized.getMap(3).get(9876543210L));
+        // For byte array keys, we need to find the entry since arrays use reference equality
+        Map<?, ?> bytesKeyedMap = deserialized.getMap(4);
+        assertEquals(1, bytesKeyedMap.size());
+        // The key should be a byte array {1, 2, 3} and the value should be "bytes_value"
+        byte[] expectedBytes = {1, 2, 3};
+        Object actualValue = null;
+        for (Map.Entry<?, ?> entry : bytesKeyedMap.entrySet()) {
+            byte[] keyBytes = (byte[]) entry.getKey();
+            if (java.util.Arrays.equals(keyBytes, expectedBytes)) {
+                actualValue = entry.getValue();
+                break;
+            }
+        }
+        assertEquals("bytes_value", actualValue);
     }
 
     @Test
