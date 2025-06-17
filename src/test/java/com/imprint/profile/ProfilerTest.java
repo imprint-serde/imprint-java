@@ -10,7 +10,7 @@ import java.util.Random;
 import java.util.stream.IntStream;
 
 
-//@Disabled
+@Disabled
 public class ProfilerTest {
 
     private static final int RECORD_SIZE = 50;

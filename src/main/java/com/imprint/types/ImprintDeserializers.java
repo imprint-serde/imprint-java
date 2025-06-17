@@ -14,7 +14,7 @@ import java.nio.ByteBuffer;
 @UtilityClass
 public final class ImprintDeserializers {
     
-    // Primitive deserializers (optimized, no Value objects)
+    // Primitive boxed deserializers
     public static Object deserializePrimitive(ByteBuffer buffer, TypeCode typeCode) throws ImprintException {
         switch (typeCode) {
             case NULL:
