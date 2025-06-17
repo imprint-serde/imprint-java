@@ -172,11 +172,11 @@ public final class ImprintRecordBuilder {
         // 1. Calculate conservative size BEFORE sorting (which invalidates the map)
         int conservativeSize = calculateConservativePayloadSize();
 
-        // 2. Sort fields by ID for directory ordering (zero allocation)
+        // 2. Sort fields by ID for directory ordering
         var sortedFieldsResult = getSortedFieldsResult();
-        var sortedValues = sortedFieldsResult.values;
-        var sortedKeys = sortedFieldsResult.keys;
-        var fieldCount = sortedFieldsResult.count;
+        var sortedValues = sortedFieldsResult.getValues();
+        var sortedKeys = sortedFieldsResult.getKeys();
+        var fieldCount = sortedFieldsResult.getCount();
 
         // 3. Calculate directory size and total size upfront
         int directorySize = ImprintRecord.calculateDirectorySize(fieldCount);
@@ -213,19 +213,12 @@ public final class ImprintRecordBuilder {
     @SneakyThrows
     private ImprintRecordBuilder addField(int id, FieldValue fieldValue) {
         Objects.requireNonNull(fieldValue, "FieldValue cannot be null");
-
-        // Calculate size for tracking using fast heuristics
         int newSize = estimateFieldSize(fieldValue);
-
-        // Efficient put with old value return - single hash operation
         var oldEntry = fields.putAndReturnOld(id, fieldValue);
-
         if (oldEntry != null) {
-            // Field replacement - subtract old size, add new size
             int oldSize = estimateFieldSize(oldEntry);
             estimatedPayloadSize += newSize - oldSize;
         } else {
-            // New field - just add new size
             estimatedPayloadSize += newSize;
         }
 
@@ -237,7 +230,6 @@ public final class ImprintRecordBuilder {
             return FieldValue.ofNull();
         }
 
-        // Direct primitive conversion - no Value object creation
         if (obj instanceof Boolean) {
             return FieldValue.ofBool((Boolean) obj);
         }
@@ -317,6 +309,7 @@ public final class ImprintRecordBuilder {
      * Writes payload first, then backfills header and directory. The positioning here is kind of
      * tricky but it allows us to write to a single buffer as opposed to merging multiple ones together
      * to form the header and directories.
+     * //TODO kind of an overload method with 7 inputs despite being performant
      */
     private ByteBuffer serializeToSingleBuffer(SchemaId schemaId, short[] sortedKeys, Object[] sortedValues, int fieldCount, int conservativePayloadSize, int directorySize,
                                                int sizeMultiplier) throws ImprintException {
@@ -410,7 +403,8 @@ public final class ImprintRecordBuilder {
                 throw new ImprintException(ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + typeCode);
         }
     }
-    
+
+    //TODO kinda hacky here, arrays and maps definitely need some functional updates to the flow
     private void serializeArray(List<?> list, ImprintBuffer buffer) throws ImprintException {
         ImprintSerializers.serializeArray(list, buffer,
             this::getTypeCodeForObject, 

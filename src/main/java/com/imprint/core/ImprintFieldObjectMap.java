@@ -1,5 +1,7 @@
 package com.imprint.core;
 
+import lombok.Value;
+
 import java.util.Arrays;
 import java.util.stream.IntStream;
 
@@ -272,6 +274,7 @@ final class ImprintFieldObjectMap<T> {
     
     /**
      * Sort the first 'count' entries by key using insertion sort (should be fast enough for small arrays).
+     * //TODO some duplication in here with the sorted values copy
      */
     private void sortEntriesByKey(int count) {
         for (int i = 1; i < count; i++) {
@@ -341,16 +344,11 @@ final class ImprintFieldObjectMap<T> {
     /**
      * Result holder for in-place sorted fields - returns both keys and values.
      */
-    public static final class SortedFieldsResult {
-        public final short[] keys;
-        public final Object[] values;
-        public final int count;
-
-        SortedFieldsResult(short[] keys, Object[] values, int count) {
-            this.keys = keys;
-            this.values = values;
-            this.count = count;
-        }
+    @Value
+    public static class SortedFieldsResult {
+        short[] keys;
+        Object[] values;
+        int count;
     }
 
     /**
@@ -366,7 +364,6 @@ final class ImprintFieldObjectMap<T> {
         compactEntries();
         sortEntriesByKey(size);
         poisoned = true;
-        
         return new SortedFieldsResult(keys, values, size);
     }
 }
