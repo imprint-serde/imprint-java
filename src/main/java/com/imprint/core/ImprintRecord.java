@@ -285,10 +285,10 @@ public class ImprintRecord {
         var entry = getDirectoryView().findEntry(fieldId);
         if (entry == null)
             throw new ImprintException(ErrorType.FIELD_NOT_FOUND, "Field " + fieldId + " not found");
-            
+
         if (entry.getTypeCode() == com.imprint.types.TypeCode.NULL)
             throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is NULL, cannot retrieve as " + typeName);
-            
+
         if (entry.getTypeCode() != expectedTypeCode)
             throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is of type " + entry.getTypeCode() + ", expected " + typeName);
 

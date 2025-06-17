@@ -5,7 +5,7 @@ import java.util.stream.IntStream;
 
 /**
  * Specialized short→object map optimized for ImprintRecordBuilder field IDs.
- * Basically a copy of EclipseCollections's primitive map:
+ * Implementation
  * - No key-value boxing/unboxing
  * - Primitive int16 keys
  * - Open addressing with linear probing
