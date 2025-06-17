@@ -49,8 +49,7 @@ public abstract class MapKey {
             case STRING:
                 return fromString((String) primitiveValue);
             default:
-                throw new ImprintException(ErrorType.TYPE_MISMATCH, 
-                    "Cannot convert " + typeCode + " to MapKey");
+                throw new ImprintException(ErrorType.TYPE_MISMATCH, "Cannot convert " + typeCode + " to MapKey");
         }
     }
     

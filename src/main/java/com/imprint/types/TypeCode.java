@@ -7,6 +7,7 @@ import lombok.Getter;
 /**
  * Type codes for Imprint values.
  */
+@Getter
 public enum TypeCode {
     NULL(0x0),
     BOOL(0x1),
@@ -20,7 +21,6 @@ public enum TypeCode {
     MAP(0x9),
     ROW(0xA);   // TODO: implement (basically a placeholder for user-defined type)
 
-    @Getter
     private final byte code;
 
     private static final TypeCode[] LOOKUP = new TypeCode[11];
@@ -40,7 +40,6 @@ public enum TypeCode {
             var type = LOOKUP[code];
             if (type != null) return type;
         }
-        throw new ImprintException(ErrorType.INVALID_TYPE_CODE,
-                "Unknown type code: 0x" + Integer.toHexString(code & 0xFF));
+        throw new ImprintException(ErrorType.INVALID_TYPE_CODE, "Unknown type code: 0x" + Integer.toHexString(code & 0xFF));
     }
 }

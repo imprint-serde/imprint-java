@@ -6,6 +6,7 @@ import com.imprint.error.ImprintException;
 import com.imprint.types.ImprintSerializers;
 import com.imprint.types.MapKey;
 import com.imprint.types.TypeCode;
+import com.imprint.util.VarInt;
 import lombok.SneakyThrows;
 
 import java.nio.BufferOverflowException;
@@ -378,7 +379,7 @@ public final class ImprintRecordBuilder {
                 serializeMap((Map<?, ?>) value, buffer);
                 break;
             case ROW:
-                // Nested record serialization
+                // Nested records
                 var nestedRecord = (ImprintRecord) value;
                 var serializedRow = nestedRecord.serializeToBuffer();
                 buffer.put(serializedRow);
@@ -387,7 +388,8 @@ public final class ImprintRecordBuilder {
                 throw new ImprintException(ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + typeCode);
         }
     }
-    
+
+    //TODO arrays and maps need to be handled better
     private void serializeArray(List<?> list, ByteBuffer buffer) throws ImprintException {
         ImprintSerializers.serializeArray(list, buffer,
             this::getTypeCodeForObject, 
@@ -400,8 +402,7 @@ public final class ImprintRecordBuilder {
             this::getTypeCodeForObject,
             this::serializeObjectDirect);
     }
-    
-    // Helper methods for static serializers
+
     private TypeCode getTypeCodeForObject(Object obj) {
         var fieldValue = convertToFieldValue(obj);
         try {
@@ -466,25 +467,21 @@ public final class ImprintRecordBuilder {
         if (fieldCount < 128) {
             buffer.put((byte) fieldCount);
         } else {
-            com.imprint.util.VarInt.encode(fieldCount, buffer);
+            VarInt.encode(fieldCount, buffer);
         }
 
         // Early return for empty directory
-        if (fieldCount == 0) {
+        if (fieldCount == 0)
             return;
-        }
 
+
+        //hopefully JIT vectorizes this
         for (int i = 0; i < fieldCount; i++) {
             var fieldValue = (FieldValue) sortedValues[i];
-            
-            // Get current position once, then batch write
             int pos = buffer.position();
-            
-            // Write all 7 bytes for this entry in sequence
-            buffer.putShort(pos, sortedKeys[i]);           // bytes 0-1: field ID  
+            buffer.putShort(pos, sortedKeys[i]);                  // bytes 0-1: field ID
             buffer.put(pos + 2, fieldValue.typeCode);      // byte 2: type code
             buffer.putInt(pos + 3, offsets[i]);            // bytes 3-6: offset
-            
             // Advance buffer position by 7 bytes
             buffer.position(pos + 7);
         }

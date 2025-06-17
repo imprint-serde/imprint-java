@@ -140,10 +140,10 @@ public final class ImprintSerializers {
 
     @SuppressWarnings("unused")
     public static void serializeNull(ByteBuffer buffer) {
-        // NULL values have no payload data
+        // NULL values have no payload data but the method helps intent
     }
 
-    // Fast size estimation using heuristics
+    // Rough size estimate since actual takes time; might be able to accomodate this better with a growable buffer though
     public static int estimateSize(TypeCode typeCode, Object value) {
         switch (typeCode) {
             case NULL: return 0;
@@ -161,13 +161,12 @@ public final class ImprintSerializers {
                 byte[] bytes = (byte[]) value;
                 return bytes.length > 1000 ? 5 + bytes.length : 256;
             case ARRAY:
-                return 512; // Conservative: most arrays are < 512 bytes
             case MAP:
-                return 512; // Conservative: most maps are < 512 bytes
+                return 512; //just rough estimate/guess for now;
             case ROW:
-                return 1024; // Conservative: most nested records are < 1KB
+                return 1024;
             default:
-                return 64; // Fallback
+                return 64;
         }
     }
 }
