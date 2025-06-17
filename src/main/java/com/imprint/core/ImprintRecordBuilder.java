@@ -209,19 +209,13 @@ public final class ImprintRecordBuilder {
     @SneakyThrows
     private ImprintRecordBuilder addField(int id, FieldValue fieldValue) {
         Objects.requireNonNull(fieldValue, "FieldValue cannot be null");
-
-        // Calculate size for tracking using fast heuristics
         int newSize = estimateFieldSize(fieldValue);
-
-        // Efficient put with old value return - single hash operation
         var oldEntry = fields.putAndReturnOld(id, fieldValue);
 
         if (oldEntry != null) {
-            // Field replacement - subtract old size, add new size
             int oldSize = estimateFieldSize(oldEntry);
             estimatedPayloadSize += newSize - oldSize;
         } else {
-            // New field - just add new size
             estimatedPayloadSize += newSize;
         }
 
@@ -232,8 +226,6 @@ public final class ImprintRecordBuilder {
         if (obj == null) {
             return FieldValue.ofNull();
         }
-
-        // Direct primitive conversion - no Value object creation
         if (obj instanceof Boolean) {
             return FieldValue.ofBool((Boolean) obj);
         }
@@ -285,9 +277,6 @@ public final class ImprintRecordBuilder {
         throw new IllegalArgumentException("Unsupported map key type: " + obj.getClass().getName());
     }
 
-    /**
-     * Fast field size estimation using heuristics for performance.
-     */
     private int estimateFieldSize(FieldValue fieldValue) {
         TypeCode typeCode;
         try {
@@ -298,18 +287,11 @@ public final class ImprintRecordBuilder {
         return ImprintSerializers.estimateSize(typeCode, fieldValue.value);
     }
 
-    /**
-     * Get current estimated payload size with 25% buffer.
-     */
     private int calculateConservativePayloadSize() {
         // Add 25% buffer for safety margin
         return Math.max(estimatedPayloadSize + (estimatedPayloadSize / 4), 4096);
     }
 
-
-    /**
-     * Result of payload serialization containing offsets and final payload buffer.
-     */
     private static class PayloadSerializationResult {
         final int[] offsets;
         final ByteBuffer payload;
@@ -320,18 +302,12 @@ public final class ImprintRecordBuilder {
         }
     }
 
-    /**
-     * Serialize payload with conservative buffer size multiplier.
-     */
     private PayloadSerializationResult serializePayload(Object[] sortedFields, int fieldCount, int conservativeSize, int sizeMultiplier) throws ImprintException {
         var payloadBuffer = ByteBuffer.allocate(conservativeSize * sizeMultiplier);
         payloadBuffer.order(ByteOrder.LITTLE_ENDIAN);
         return doSerializePayload(sortedFields, fieldCount, payloadBuffer);
     }
 
-    /**
-     * Core payload serialization logic.
-     */
     private PayloadSerializationResult doSerializePayload(Object[] sortedFields, int fieldCount, ByteBuffer payloadBuffer) throws ImprintException {
         int[] offsets = new int[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
