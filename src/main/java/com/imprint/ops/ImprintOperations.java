@@ -76,8 +76,8 @@ public class ImprintOperations {
         int totalMergedPayloadSize = 0;
         int currentMergedOffset = 0;
         
-        RawDirectoryEntry firstEntry = firstDirIter.hasNext() ? firstDirIter.next() : null;
-        RawDirectoryEntry secondEntry = secondDirIter.hasNext() ? secondDirIter.next() : null;
+        var firstEntry = firstDirIter.hasNext() ? firstDirIter.next() : null;
+        var secondEntry = secondDirIter.hasNext() ? secondDirIter.next() : null;
         
         // Merge directories and collect payload chunks
         while (firstEntry != null || secondEntry != null) {
@@ -90,9 +90,9 @@ public class ImprintOperations {
                 sourcePayload = getFieldPayload(firstSections.payloadBuffer, firstEntry, firstDirIter);
                 
                 // Skip duplicate in second if present
-                if (secondEntry != null && firstEntry.fieldId == secondEntry.fieldId) {
+                if (secondEntry != null && firstEntry.fieldId == secondEntry.fieldId)
                     secondEntry = secondDirIter.hasNext() ? secondDirIter.next() : null;
-                }
+
                 firstEntry = firstDirIter.hasNext() ? firstDirIter.next() : null;
             } else {
                 // Take from second

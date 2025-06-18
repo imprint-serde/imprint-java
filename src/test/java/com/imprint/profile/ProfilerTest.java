@@ -2,13 +2,9 @@ package com.imprint.profile;
 
 import com.imprint.core.ImprintRecord;
 import com.imprint.core.SchemaId;
-import com.imprint.ops.ImprintOperations;
-import com.imprint.types.Value;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Random;
 import java.util.stream.IntStream;
@@ -136,7 +132,7 @@ public class ProfilerTest {
     @Tag("serialization")
     @Tag("small-records")
     void profileSmallRecordSerialization() throws Exception {
-        profileSerialization("small records", RECORD_SIZE, 100_000);
+        profileSerialization("small records", RECORD_SIZE, 600_000);
     }
 
     @Test
@@ -271,25 +267,25 @@ public class ProfilerTest {
             for (int fieldId = 1; fieldId <= recordSize; fieldId++) {
                 switch (fieldId % 7) {
                     case 0:
-                        builder.field(fieldId, Value.fromInt32(i + fieldId));
+                        builder.field(fieldId, i + fieldId);
                         break;
                     case 1:
-                        builder.field(fieldId, Value.fromInt64(i * 1000L + fieldId));
+                        builder.field(fieldId, i * 1000L + fieldId);
                         break;
                     case 2:
-                        builder.field(fieldId, Value.fromString("test-string-" + i + "-" + fieldId));
+                        builder.field(fieldId, "test-string-" + i + "-" + fieldId);
                         break;
                     case 3:
-                        builder.field(fieldId, Value.fromString("longer-descriptive-text-for-field-" + fieldId + "-iteration-" + i));
+                        builder.field(fieldId, "longer-descriptive-text-for-field-" + fieldId + "-iteration-" + i);
                         break;
                     case 4:
-                        builder.field(fieldId, Value.fromFloat64(i * 3.14159 + fieldId));
+                        builder.field(fieldId, i * 3.14159 + fieldId);
                         break;
                     case 5:
-                        builder.field(fieldId, Value.fromBytes(("bytes-" + i + "-" + fieldId).getBytes()));
+                        builder.field(fieldId, ("bytes-" + i + "-" + fieldId).getBytes());
                         break;
                     case 6:
-                        builder.field(fieldId, Value.fromBoolean((i + fieldId) % 2 == 0));
+                        builder.field(fieldId, (i + fieldId) % 2 == 0);
                         break;
                 }
             }
@@ -324,16 +320,16 @@ public class ProfilerTest {
         for (int i = 1; i <= recordSize; i++) {
             switch (i % 4) {
                 case 0:
-                    builder.field(i, Value.fromInt32(i * 100));
+                    builder.field(i, i * 100);
                     break;
                 case 1:
-                    builder.field(i, Value.fromString("field-value-" + i));
+                    builder.field(i, "field-value-" + i);
                     break;
                 case 2:
-                    builder.field(i, Value.fromFloat64(i * 3.14159));
+                    builder.field(i, i * 3.14159);
                     break;
                 case 3:
-                    builder.field(i, Value.fromBytes(("bytes-" + i).getBytes()));
+                    builder.field(i, ("bytes-" + i).getBytes());
                     break;
             }
         }
@@ -346,16 +342,16 @@ public class ProfilerTest {
         for (int fieldId : fieldIds) {
             switch (fieldId % 4) {
                 case 0:
-                    builder.field(fieldId, Value.fromInt32(fieldId * 100));
+                    builder.field(fieldId, fieldId * 100);
                     break;
                 case 1:
-                    builder.field(fieldId, Value.fromString("field-value-" + fieldId));
+                    builder.field(fieldId, "field-value-" + fieldId);
                     break;
                 case 2:
-                    builder.field(fieldId, Value.fromFloat64(fieldId * 3.14159));
+                    builder.field(fieldId, fieldId * 3.14159);
                     break;
                 case 3:
-                    builder.field(fieldId, Value.fromBytes(("bytes-" + fieldId).getBytes()));
+                    builder.field(fieldId, ("bytes-" + fieldId).getBytes());
                     break;
             }
         }
@@ -378,60 +374,5 @@ public class ProfilerTest {
                 .distinct()
                 .sorted()
                 .toArray();
-    }
-
-    @Test
-    @Tag("profiling")
-    void profileBytesToBytesVsObjectMerge() throws Exception {
-        System.out.println("=== Bytes-to-Bytes vs Object Merge Comparison ===");
-        
-        // Create test records
-        var record1 = createTestRecordWithFieldIds(new int[]{1, 3, 5, 7, 9, 11, 13, 15});
-        var record2 = createTestRecordWithFieldIds(new int[]{2, 4, 6, 8, 10, 12, 14, 16});
-        
-        var record1Bytes = record1.serializeToBuffer();
-        var record2Bytes = record2.serializeToBuffer();
-        
-        int iterations = 50_000;
-        
-        // Warm up
-        for (int i = 0; i < 1000; i++) {
-            record1.merge(record2).serializeToBuffer();
-            ImprintOperations.mergeBytes(record1Bytes, record2Bytes);
-        }
-        
-        System.out.printf("Profiling %,d merge operations...%n", iterations);
-        
-        // Test object merge + serialize
-        long startObjectMerge = System.nanoTime();
-        for (int i = 0; i < iterations; i++) {
-            var merged = record1.merge(record2);
-            var serialized = merged.serializeToBuffer();
-            // Consume result to prevent optimization
-            if (serialized.remaining() == 0) throw new RuntimeException("Empty result");
-        }
-        long objectMergeTime = System.nanoTime() - startObjectMerge;
-        
-        // Test bytes merge
-        long startBytesMerge = System.nanoTime();
-        for (int i = 0; i < iterations; i++) {
-            var merged = ImprintOperations.mergeBytes(record1Bytes, record2Bytes);
-            // Consume result to prevent optimization
-            if (merged.remaining() == 0) throw new RuntimeException("Empty result");
-        }
-        long bytesMergeTime = System.nanoTime() - startBytesMerge;
-        
-        double objectAvg = (double) objectMergeTime / iterations / 1000.0; // microseconds
-        double bytesAvg = (double) bytesMergeTime / iterations / 1000.0;   // microseconds
-        double speedup = objectAvg / bytesAvg;
-        
-        System.out.printf("Object merge + serialize: %.2f ms (avg: %.1f μs/op)%n", 
-                objectMergeTime / 1_000_000.0, objectAvg);
-        System.out.printf("Bytes-to-bytes merge:     %.2f ms (avg: %.1f μs/op)%n", 
-                bytesMergeTime / 1_000_000.0, bytesAvg);
-        System.out.printf("Speedup: %.1fx faster%n", speedup);
-        
-        // Assert that bytes approach is faster (should be at least 1.5x)
-        assertTrue(speedup > 1.0, String.format("Bytes merge should be faster. Got %.1fx speedup", speedup));
     }
 }

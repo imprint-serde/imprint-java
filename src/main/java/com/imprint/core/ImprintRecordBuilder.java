@@ -3,10 +3,13 @@ package com.imprint.core;
 import com.imprint.Constants;
 import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
+import com.imprint.types.ImprintSerializers;
 import com.imprint.types.MapKey;
-import com.imprint.types.Value;
+import com.imprint.types.TypeCode;
+import com.imprint.util.VarInt;
 import lombok.SneakyThrows;
 
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.*;
@@ -35,91 +38,89 @@ import java.util.*;
 @SuppressWarnings("unused")
 public final class ImprintRecordBuilder {
     private final SchemaId schemaId;
-    private final ImprintFieldObjectMap<FieldData> fields = new ImprintFieldObjectMap<>();
+    private final ImprintFieldObjectMap<FieldValue> fields;
     private int estimatedPayloadSize = 0;
 
-    static final class FieldData {
-        final short id;
-        final Value value;
+    // Direct primitive storage to avoid Value object creation
+    @lombok.Value
+    static class FieldValue {
+        byte typeCode;
+        Object value;
         
-        FieldData(short id, Value value) {
-            this.id = id;
-            this.value = value;
-        }
+        // Fast factory methods for primitives
+        static FieldValue ofInt32(int value) { return new FieldValue(TypeCode.INT32.getCode(), value); }
+        static FieldValue ofInt64(long value) { return new FieldValue(TypeCode.INT64.getCode(), value); }
+        static FieldValue ofFloat32(float value) { return new FieldValue(TypeCode.FLOAT32.getCode(), value); }
+        static FieldValue ofFloat64(double value) { return new FieldValue(TypeCode.FLOAT64.getCode(), value); }
+        static FieldValue ofBool(boolean value) { return new FieldValue(TypeCode.BOOL.getCode(), value); }
+        static FieldValue ofString(String value) { return new FieldValue(TypeCode.STRING.getCode(), value); }
+        static FieldValue ofBytes(byte[] value) { return new FieldValue(TypeCode.BYTES.getCode(), value); }
+        static FieldValue ofArray(List<?> value) { return new FieldValue(TypeCode.ARRAY.getCode(), value); }
+        static FieldValue ofMap(Map<?, ?> value) { return new FieldValue(TypeCode.MAP.getCode(), value); }
+        static FieldValue ofNull() { return new FieldValue(TypeCode.NULL.getCode(), null); }
     }
-    
 
     ImprintRecordBuilder(SchemaId schemaId) {
+        this(schemaId, 16); // Default capacity for typical usage (8-16 fields)
+    }
+    
+    ImprintRecordBuilder(SchemaId schemaId, int expectedFieldCount) {
         this.schemaId = Objects.requireNonNull(schemaId, "SchemaId cannot be null");
+        this.fields = new ImprintFieldObjectMap<>(expectedFieldCount);
     }
 
-    // Primitive types with automatic Value wrapping
+
     public ImprintRecordBuilder field(int id, boolean value) {
-        return addField(id, Value.fromBoolean(value));
+        return addField(id, FieldValue.ofBool(value));
     }
 
     public ImprintRecordBuilder field(int id, int value) {
-        return addField(id, Value.fromInt32(value));
+        return addField(id, FieldValue.ofInt32(value));
     }
 
     public ImprintRecordBuilder field(int id, long value) {
-        return addField(id, Value.fromInt64(value));
+        return addField(id, FieldValue.ofInt64(value));
     }
 
     public ImprintRecordBuilder field(int id, float value) {
-        return addField(id, Value.fromFloat32(value));
+        return addField(id, FieldValue.ofFloat32(value));
     }
 
     public ImprintRecordBuilder field(int id, double value) {
-        return addField(id, Value.fromFloat64(value));
+        return addField(id, FieldValue.ofFloat64(value));
     }
 
     public ImprintRecordBuilder field(int id, String value) {
-        return addField(id, Value.fromString(value));
+        return addField(id, FieldValue.ofString(value));
     }
 
     public ImprintRecordBuilder field(int id, byte[] value) {
-        return addField(id, Value.fromBytes(value));
+        return addField(id, FieldValue.ofBytes(value));
     }
 
-    // Collections with automatic conversion
+    // Collections - store as raw collections, convert during serialization
     public ImprintRecordBuilder field(int id, List<?> values) {
-        var convertedValues = new ArrayList<Value>(values.size());
-        for (var item : values) {
-            convertedValues.add(convertToValue(item));
-        }
-        return addField(id, Value.fromArray(convertedValues));
+        return addField(id, FieldValue.ofArray(values));
     }
 
     public ImprintRecordBuilder field(int id, Map<?, ?> map) {
-        var convertedMap = new HashMap<MapKey, Value>(map.size());
-        for (var entry : map.entrySet()) {
-            var key = convertToMapKey(entry.getKey());
-            var value = convertToValue(entry.getValue());
-            convertedMap.put(key, value);
-        }
-        return addField(id, Value.fromMap(convertedMap));
+        return addField(id, FieldValue.ofMap(map));
     }
 
     // Nested records
     public ImprintRecordBuilder field(int id, ImprintRecord nestedRecord) {
-        return addField(id, Value.fromRow(nestedRecord));
+        return addField(id, new FieldValue(TypeCode.ROW.getCode(), nestedRecord));
     }
 
     // Explicit null field
     public ImprintRecordBuilder nullField(int id) {
-        return addField(id, Value.nullValue());
-    }
-
-    // Direct Value API (escape hatch for advanced usage)
-    public ImprintRecordBuilder field(int id, Value value) {
-        return addField(id, value);
+        return addField(id, FieldValue.ofNull());
     }
 
     // Conditional field addition
     public ImprintRecordBuilder fieldIf(boolean condition, int id, Object value) {
         if (condition) {
-            return field(id, convertToValue(value));
+            return addField(id, convertToFieldValue(value));
         }
         return this;
     }
@@ -131,7 +132,7 @@ public final class ImprintRecordBuilder {
     // Bulk operations
     public ImprintRecordBuilder fields(Map<Integer, ?> fieldsMap) {
         for (var entry : fieldsMap.entrySet()) {
-            field(entry.getKey(), convertToValue(entry.getValue()));
+            addField(entry.getKey(), convertToFieldValue(entry.getValue()));
         }
         return this;
     }
@@ -168,26 +169,33 @@ public final class ImprintRecordBuilder {
      * @throws ImprintException if serialization fails.
      */
     public ByteBuffer buildToBuffer() throws ImprintException {
-        // 1. Sort fields by ID for directory ordering (zero allocation)
+        // 1. Calculate conservative size BEFORE sorting (which invalidates the map)
+        int conservativeSize = calculateConservativePayloadSize();
+
+        // 2. Sort fields by ID for directory ordering (zero allocation)
         var sortedFieldsResult = getSortedFieldsResult();
-        var sortedFields = sortedFieldsResult.values;
+        var sortedValues = sortedFieldsResult.values;
+        var sortedKeys = sortedFieldsResult.keys;
         var fieldCount = sortedFieldsResult.count;
-        
-        // 2. Serialize payload and calculate offsets
-        var payloadBuffer = ByteBuffer.allocate(estimatePayloadSize());
-        payloadBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
-        int[] offsets = new int[fieldCount];
-        for (int i = 0; i < fieldCount; i++) {
-            var fieldData = (FieldData) sortedFields[i];
-            offsets[i] = payloadBuffer.position();
-            serializeValue(fieldData.value, payloadBuffer);
+        // 3. Serialize payload and calculate offsets with overflow handling
+        PayloadSerializationResult result = null;
+        int bufferSizeMultiplier = 1;
+
+        while (result == null && bufferSizeMultiplier <= 64) {
+            try {
+                result = serializePayload(sortedValues, fieldCount, conservativeSize, bufferSizeMultiplier);
+            } catch (BufferOverflowException e) {
+                bufferSizeMultiplier *= 2; // Try 2x, 4x, 8x, 16x, 32x, 64x
+            }
         }
-        payloadBuffer.flip();
-        var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
 
-        // 3. Create directory buffer and serialize to final buffer
-        return serializeToBuffer(schemaId, sortedFields, offsets, fieldCount, payloadView);
+        if (result == null) {
+            throw new ImprintException(ErrorType.SERIALIZATION_ERROR,
+                    "Failed to serialize payload even with 64x buffer size");
+        }
+
+        return serializeToBuffer(schemaId, sortedKeys, sortedValues, result.offsets, fieldCount, result.payload);
     }
 
     /**
@@ -195,78 +203,58 @@ public final class ImprintRecordBuilder {
      * If a field with the given ID already exists, it will be replaced.
      *
      * @param id the field ID
-     * @param value the field value (cannot be null - use nullField() for explicit nulls)
+     * @param fieldValue the field value with type code
      * @return this builder for method chaining
      */
-    private ImprintRecordBuilder addField(int id, Value value) {
-        Objects.requireNonNull(value, "Value cannot be null - use nullField() for explicit null values");
-        var newEntry = new FieldData((short) id, value);
+    @SneakyThrows
+    private ImprintRecordBuilder addField(int id, FieldValue fieldValue) {
+        Objects.requireNonNull(fieldValue, "FieldValue cannot be null");
+        int newSize = estimateFieldSize(fieldValue);
+        var oldEntry = fields.putAndReturnOld(id, fieldValue);
 
-        // Check if replacing an existing field
-        var oldEntry = fields.get(id);
         if (oldEntry != null) {
-            estimatedPayloadSize -= estimateValueSize(oldEntry.value);
+            int oldSize = estimateFieldSize(oldEntry);
+            estimatedPayloadSize += newSize - oldSize;
+        } else {
+            estimatedPayloadSize += newSize;
         }
 
-        // Add or replace field
-        fields.put(id, newEntry);
-        estimatedPayloadSize += estimateValueSize(newEntry.value);
         return this;
     }
 
-    private Value convertToValue(Object obj) {
+    private FieldValue convertToFieldValue(Object obj) {
         if (obj == null) {
-            return Value.nullValue();
+            return FieldValue.ofNull();
         }
-
-        if (obj instanceof Value) {
-            return (Value) obj;
-        }
-
-        // Auto-boxing conversion
         if (obj instanceof Boolean) {
-            return Value.fromBoolean((Boolean) obj);
+            return FieldValue.ofBool((Boolean) obj);
         }
         if (obj instanceof Integer) {
-            return Value.fromInt32((Integer) obj);
+            return FieldValue.ofInt32((Integer) obj);
         }
         if (obj instanceof Long) {
-            return Value.fromInt64((Long) obj);
+            return FieldValue.ofInt64((Long) obj);
         }
         if (obj instanceof Float) {
-            return Value.fromFloat32((Float) obj);
+            return FieldValue.ofFloat32((Float) obj);
         }
         if (obj instanceof Double) {
-            return Value.fromFloat64((Double) obj);
+            return FieldValue.ofFloat64((Double) obj);
         }
         if (obj instanceof String) {
-            return Value.fromString((String) obj);
+            return FieldValue.ofString((String) obj);
         }
         if (obj instanceof byte[]) {
-            return Value.fromBytes((byte[]) obj);
+            return FieldValue.ofBytes((byte[]) obj);
         }
         if (obj instanceof List) {
-            @SuppressWarnings("unchecked")
-            List<Object> list = (List<Object>) obj;
-            var convertedValues = new ArrayList<Value>(list.size());
-            for (var item : list) {
-                convertedValues.add(convertToValue(item));
-            }
-            return Value.fromArray(convertedValues);
+            return FieldValue.ofArray((List<?>) obj);
         }
         if (obj instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<Object, Object> map = (Map<Object, Object>) obj;
-            var convertedMap = new HashMap<MapKey, Value>(map.size());
-            for (var entry : map.entrySet()) {
-                var key = convertToMapKey(entry.getKey());
-                var value = convertToValue(entry.getValue());
-                convertedMap.put(key, value);
-            }
-            return Value.fromMap(convertedMap);
+            return FieldValue.ofMap((Map<?, ?>) obj);
         }
         if (obj instanceof ImprintRecord) {
-            return Value.fromRow((ImprintRecord) obj);
+            return new FieldValue(TypeCode.ROW.getCode(), obj);
         }
 
         throw new IllegalArgumentException("Unsupported type for auto-conversion: " + obj.getClass().getName());
@@ -289,65 +277,123 @@ public final class ImprintRecordBuilder {
         throw new IllegalArgumentException("Unsupported map key type: " + obj.getClass().getName());
     }
 
-    private int estimatePayloadSize() {
-        // Add 25% buffer to reduce reallocations and handle VarInt encoding fluctuations.
-        return Math.max(estimatedPayloadSize + (estimatedPayloadSize / 4), fields.size() * 16);
+    private int estimateFieldSize(FieldValue fieldValue) {
+        TypeCode typeCode;
+        try {
+            typeCode = TypeCode.fromByte(fieldValue.typeCode);
+        } catch (ImprintException e) {
+            throw new RuntimeException("Invalid type code in FieldValue: " + fieldValue.typeCode, e);
+        }
+        return ImprintSerializers.estimateSize(typeCode, fieldValue.value);
     }
 
-    /**
-     * Estimates the serialized size in bytes for a given value.
-     *
-     * @param value the value to estimate size for
-     * @return estimated size in bytes including type-specific overhead
-     */
-    @SneakyThrows
-    private int estimateValueSize(Value value) {
-        // Use TypeHandler for simple types
-        switch (value.getTypeCode()) {
-            case NULL:
-            case BOOL:
-            case INT32:
-            case INT64:
-            case FLOAT32:
-            case FLOAT64:
-            case BYTES:
-            case STRING:
-            case ARRAY:
-            case MAP:
-                return value.getTypeCode().getHandler().estimateSize(value);
+    private int calculateConservativePayloadSize() {
+        // Add 25% buffer for safety margin
+        return Math.max(estimatedPayloadSize + (estimatedPayloadSize / 4), 4096);
+    }
 
-            case ROW:
-                Value.RowValue rowValue = (Value.RowValue) value;
-                return rowValue.getValue().estimateSerializedSize();
+    private static class PayloadSerializationResult {
+        final int[] offsets;
+        final ByteBuffer payload;
 
-            default:
-                throw new ImprintException(ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + value.getTypeCode());
+        PayloadSerializationResult(int[] offsets, ByteBuffer payload) {
+            this.offsets = offsets;
+            this.payload = payload;
         }
     }
 
-    private void serializeValue(Value value, ByteBuffer buffer) throws ImprintException {
-        switch (value.getTypeCode()) {
+    private PayloadSerializationResult serializePayload(Object[] sortedFields, int fieldCount, int conservativeSize, int sizeMultiplier) throws ImprintException {
+        var payloadBuffer = ByteBuffer.allocate(conservativeSize * sizeMultiplier);
+        payloadBuffer.order(ByteOrder.LITTLE_ENDIAN);
+        return doSerializePayload(sortedFields, fieldCount, payloadBuffer);
+    }
+
+    private PayloadSerializationResult doSerializePayload(Object[] sortedFields, int fieldCount, ByteBuffer payloadBuffer) throws ImprintException {
+        int[] offsets = new int[fieldCount];
+        for (int i = 0; i < fieldCount; i++) {
+            var fieldValue = (FieldValue) sortedFields[i];
+            offsets[i] = payloadBuffer.position();
+            serializeFieldValue(fieldValue, payloadBuffer);
+        }
+        payloadBuffer.flip();
+        var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
+        return new PayloadSerializationResult(offsets, payloadView);
+    }
+
+    private void serializeFieldValue(FieldValue fieldValue, ByteBuffer buffer) throws ImprintException {
+        var typeCode = TypeCode.fromByte(fieldValue.typeCode);
+        var value = fieldValue.value;
+        switch (typeCode) {
             case NULL:
-            case BOOL:
-            case INT32:
-            case INT64:
-            case FLOAT32:
-            case FLOAT64:
-            case BYTES:
-            case STRING:
-            case ARRAY:
-            case MAP:
-                value.getTypeCode().getHandler().serialize(value, buffer);
+                ImprintSerializers.serializeNull(buffer);
                 break;
-            //TODO eliminate this switch entirely by implementing a ROW TypeHandler
+            case BOOL:
+                ImprintSerializers.serializeBool((Boolean) value, buffer);
+                break;
+            case INT32:
+                ImprintSerializers.serializeInt32((Integer) value, buffer);
+                break;
+            case INT64:
+                ImprintSerializers.serializeInt64((Long) value, buffer);
+                break;
+            case FLOAT32:
+                ImprintSerializers.serializeFloat32((Float) value, buffer);
+                break;
+            case FLOAT64:
+                ImprintSerializers.serializeFloat64((Double) value, buffer);
+                break;
+            case STRING:
+                ImprintSerializers.serializeString((String) value, buffer);
+                break;
+            case BYTES:
+                ImprintSerializers.serializeBytes((byte[]) value, buffer);
+                break;
+            case ARRAY:
+                serializeArray((List<?>) value, buffer);
+                break;
+            case MAP:
+                serializeMap((Map<?, ?>) value, buffer);
+                break;
             case ROW:
-                Value.RowValue rowValue = (Value.RowValue) value;
-                var serializedRow = rowValue.getValue().serializeToBuffer();
+                // Nested records
+                var nestedRecord = (ImprintRecord) value;
+                var serializedRow = nestedRecord.serializeToBuffer();
                 buffer.put(serializedRow);
                 break;
-
             default:
-                throw new ImprintException(ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + value.getTypeCode());
+                throw new ImprintException(ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + typeCode);
+        }
+    }
+
+    //TODO arrays and maps need to be handled better
+    private void serializeArray(List<?> list, ByteBuffer buffer) throws ImprintException {
+        ImprintSerializers.serializeArray(list, buffer,
+            this::getTypeCodeForObject, 
+            this::serializeObjectDirect);
+    }
+    
+    private void serializeMap(Map<?, ?> map, ByteBuffer buffer) throws ImprintException {
+        ImprintSerializers.serializeMap(map, buffer,
+            this::convertToMapKey,
+            this::getTypeCodeForObject,
+            this::serializeObjectDirect);
+    }
+
+    private TypeCode getTypeCodeForObject(Object obj) {
+        var fieldValue = convertToFieldValue(obj);
+        try {
+            return TypeCode.fromByte(fieldValue.typeCode);
+        } catch (ImprintException e) {
+            throw new RuntimeException("Invalid type code", e);
+        }
+    }
+    
+    private void serializeObjectDirect(Object obj, ByteBuffer buffer) {
+        try {
+            var fieldValue = convertToFieldValue(obj);
+            serializeFieldValue(fieldValue, buffer);
+        } catch (ImprintException e) {
+            throw new RuntimeException("Serialization failed", e);
         }
     }
 
@@ -355,18 +401,18 @@ public final class ImprintRecordBuilder {
      * Get fields sorted by ID from the map.
      * Returns internal map array reference + count to avoid any copying but sacrifices the map structure in the process.
      */
-    private ImprintFieldObjectMap.SortedValuesResult getSortedFieldsResult() {
-        return fields.getSortedValues();
+    private ImprintFieldObjectMap.SortedFieldsResult getSortedFieldsResult() {
+        return fields.getSortedFields();
     }
 
     /**
      * Serialize components into a single ByteBuffer.
      */
-    private static ByteBuffer serializeToBuffer(SchemaId schemaId, Object[] sortedFields, int[] offsets, int fieldCount, ByteBuffer payload) {
+    private static ByteBuffer serializeToBuffer(SchemaId schemaId, short[] sortedKeys, Object[] sortedValues, int[] offsets, int fieldCount, ByteBuffer payload) {
         var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
-        var directoryBuffer = ImprintRecord.createDirectoryBufferFromSorted(sortedFields, offsets, fieldCount);
+        int directorySize = ImprintRecord.calculateDirectorySize(fieldCount);
 
-        int finalSize = Constants.HEADER_BYTES + directoryBuffer.remaining() + payload.remaining();
+        int finalSize = Constants.HEADER_BYTES + directorySize + payload.remaining();
         var finalBuffer = ByteBuffer.allocate(finalSize);
         finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
@@ -377,10 +423,44 @@ public final class ImprintRecordBuilder {
         finalBuffer.putInt(header.getSchemaId().getFieldSpaceId());
         finalBuffer.putInt(header.getSchemaId().getSchemaHash());
         finalBuffer.putInt(header.getPayloadSize());
-        finalBuffer.put(directoryBuffer);
+
+        // Write directory with FieldValue type codes
+        writeDirectoryToBuffer(sortedKeys, sortedValues, offsets, fieldCount, finalBuffer);
+
+        // Write payload
         finalBuffer.put(payload);
 
         finalBuffer.flip();
         return finalBuffer.asReadOnlyBuffer();
     }
+    
+    /**
+     * Write directory entries directly to buffer for FieldValue objects.
+     */
+    private static void writeDirectoryToBuffer(short[] sortedKeys, Object[] sortedValues, int[] offsets, int fieldCount, ByteBuffer buffer) {
+        // Write field count at the beginning of directory
+        // Optimize VarInt encoding for common case (< 128 fields = single byte)
+        if (fieldCount < 128) {
+            buffer.put((byte) fieldCount);
+        } else {
+            VarInt.encode(fieldCount, buffer);
+        }
+
+        // Early return for empty directory
+        if (fieldCount == 0)
+            return;
+
+
+        //hopefully JIT vectorizes this
+        for (int i = 0; i < fieldCount; i++) {
+            var fieldValue = (FieldValue) sortedValues[i];
+            int pos = buffer.position();
+            buffer.putShort(pos, sortedKeys[i]);                  // bytes 0-1: field ID
+            buffer.put(pos + 2, fieldValue.typeCode);      // byte 2: type code
+            buffer.putInt(pos + 3, offsets[i]);            // bytes 3-6: offset
+            // Advance buffer position by 7 bytes
+            buffer.position(pos + 7);
+        }
+    }
+
 }
