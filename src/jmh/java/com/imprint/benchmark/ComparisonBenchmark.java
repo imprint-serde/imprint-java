@@ -16,8 +16,14 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
 @Warmup(iterations = 3, time = 1)
-@Measurement(iterations = 7, time = 1)
-@Fork(value = 1, jvmArgs = {"-Xms4g", "-Xmx4g"})
+@Measurement(iterations = 10, time = 1)
+@Fork(value = 1, jvmArgs = {"-Xms4g", "-Xmx4g", 
+    "--illegal-access=permit",
+    "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED", 
+    "--add-opens=java.base/java.util=ALL-UNNAMED",
+    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"})
 public class ComparisonBenchmark {
 
     private static final List<SerializingBenchmark> FRAMEWORKS = List.of(
@@ -28,9 +34,10 @@ public class ComparisonBenchmark {
             new AvroSerializingBenchmark(),
             new ThriftSerializingBenchmark(),
             new KryoSerializingBenchmark(),
-            new MessagePackSerializingBenchmark());
+            new MessagePackSerializingBenchmark(),
+            new ChronicleWireSerializingBenchmark());
 
-    @Param({"Imprint", "Jackson-JSON", "Protobuf", "FlatBuffers", "Avro-Generic", "Thrift", "Kryo", "MessagePack", ""})
+    @Param({"Imprint", "Jackson-JSON", "Protobuf", "FlatBuffers", "Avro-Generic", "Thrift", "Kryo", "MessagePack", "Chronicle-Wire"})
     public String framework;
 
     private SerializingBenchmark serializingBenchmark;
@@ -50,28 +57,28 @@ public class ComparisonBenchmark {
         serializingBenchmark.setup(testRecord1, testRecord2);
     }
 
-    //@Benchmark
-    public void serialize(Blackhole bh) {
+    @Benchmark
+    public void serializeRecord(Blackhole bh) {
         serializingBenchmark.serialize(bh);
     }
 
-    //@Benchmark
-    public void deserialize(Blackhole bh) {
+    @Benchmark
+    public void deserializeRecord(Blackhole bh) {
         serializingBenchmark.deserialize(bh);
     }
 
-    //@Benchmark
-    public void projectAndSerialize(Blackhole bh) {
+    @Benchmark
+    public void projectThenSerialize(Blackhole bh) {
         serializingBenchmark.projectAndSerialize(bh);
     }
 
     @Benchmark
-    public void mergeAndSerialize(Blackhole bh) {
+    public void mergeThenSerialize(Blackhole bh) {
         serializingBenchmark.mergeAndSerialize(bh);
     }
 
-    //@Benchmark
-    public void accessField(Blackhole bh) {
+    @Benchmark
+    public void accessSingleField(Blackhole bh) {
         serializingBenchmark.accessField(bh);
     }
 

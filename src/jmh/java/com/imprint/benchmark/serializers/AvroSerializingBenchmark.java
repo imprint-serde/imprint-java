@@ -11,6 +11,7 @@ import org.openjdk.jmh.infra.Blackhole;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
+import java.util.List;
 
 public class AvroSerializingBenchmark extends AbstractSerializingBenchmark {
 
@@ -101,7 +102,7 @@ public class AvroSerializingBenchmark extends AbstractSerializingBenchmark {
             GenericRecord projected = new GenericData.Record(projectedSchema);
             projected.put("id", original.get("id"));
             projected.put("timestamp", original.get("timestamp"));
-            projected.put("tags", ((java.util.List)original.get("tags")).subList(0, 5));
+            projected.put("tags", ((List)original.get("tags")).subList(0, 5));
 
             BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
             projectedWriter.write(projected, encoder);
@@ -130,19 +131,6 @@ public class AvroSerializingBenchmark extends AbstractSerializingBenchmark {
         merged.put("metadata", r2.get("metadata"));
         
         bh.consume(buildBytes(merged));
-    }
-
-    private GenericRecord buildAvroRecord(DataGenerator.TestRecord pojo) {
-        GenericRecord record = new GenericData.Record(schema);
-        record.put("id", pojo.id);
-        record.put("timestamp", pojo.timestamp);
-        record.put("flags", pojo.flags);
-        record.put("active", pojo.active);
-        record.put("value", pojo.value);
-        record.put("data", ByteBuffer.wrap(pojo.data));
-        record.put("tags", pojo.tags);
-        record.put("metadata", pojo.metadata);
-        return record;
     }
 
     private GenericRecord buildAvroRecordFromBytes(byte[] bytes) {

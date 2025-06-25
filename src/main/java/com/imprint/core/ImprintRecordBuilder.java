@@ -10,7 +10,6 @@ import com.imprint.util.ImprintBuffer;
 import lombok.SneakyThrows;
 import lombok.Value;
 
-import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
@@ -98,7 +97,7 @@ public final class ImprintRecordBuilder {
         return addField(id, FieldValue.ofBytes(value));
     }
 
-    // Collections - store as raw collections, convert during serialization
+    // Collections - store as raw collections for now, convert during serialization
     public ImprintRecordBuilder field(int id, List<?> values) {
         return addField(id, FieldValue.ofArray(values));
     }
@@ -137,23 +136,6 @@ public final class ImprintRecordBuilder {
         return this;
     }
 
-    // Builder utilities
-    public boolean hasField(int id) {
-        return fields.containsKey(id);
-    }
-
-    public int fieldCount() {
-        return fields.size();
-    }
-
-    public Set<Integer> fieldIds() {
-        var ids = new HashSet<Integer>(fields.size());
-        var keys = fields.getKeys();
-        for (var key : keys) {
-            ids.add(key);
-        }
-        return ids;
-    }
 
     // Build the final record
     public ImprintRecord build() throws ImprintException {
@@ -163,7 +145,7 @@ public final class ImprintRecordBuilder {
     }
 
     /**
-     * Builds the record and serializes it directly to a ByteBuffer.
+     * Builds the record and serializes it directly to a ByteBuffer using growable buffer optimization.
      *
      * @return A read-only ByteBuffer containing the fully serialized record.
      * @throws ImprintException if serialization fails.
@@ -178,28 +160,12 @@ public final class ImprintRecordBuilder {
         var sortedKeys = sortedFieldsResult.getKeys();
         var fieldCount = sortedFieldsResult.getCount();
 
-        // 3. Calculate directory size and total size upfront
+        // 3. Calculate directory size
         int directorySize = ImprintRecord.calculateDirectorySize(fieldCount);
         
-        // 4. Serialize directly to single buffer with overflow handling
-        ByteBuffer result = null;
-        int bufferSizeMultiplier = 1;
-
-        while (result == null && bufferSizeMultiplier <= 64) {
-            try {
-                result = serializeToSingleBuffer(schemaId, sortedKeys, sortedValues, fieldCount, 
-                    conservativeSize, directorySize, bufferSizeMultiplier);
-            } catch (BufferOverflowException e) {
-                bufferSizeMultiplier *= 2; // Try 2x, 4x, 8x, 16x, 32x, 64x
-            }
-        }
-
-        if (result == null) {
-            throw new ImprintException(ErrorType.SERIALIZATION_ERROR,
-                    "Failed to serialize even with 64x buffer size");
-        }
-
-        return result;
+        // 4. Use growable buffer to eliminate size guessing and retry logic
+        return serializeToBuffer(schemaId, sortedKeys, sortedValues, fieldCount,
+            conservativeSize, directorySize);
     }
 
     /**
@@ -284,13 +250,9 @@ public final class ImprintRecordBuilder {
     /**
      * Fast field size estimation using heuristics for performance.
      */
+    @SneakyThrows
     private int estimateFieldSize(FieldValue fieldValue) {
-        TypeCode typeCode;
-        try {
-            typeCode = TypeCode.fromByte(fieldValue.typeCode);
-        } catch (ImprintException e) {
-            throw new RuntimeException("Invalid type code in FieldValue: " + fieldValue.typeCode, e);
-        }
+        var typeCode = TypeCode.fromByte(fieldValue.typeCode);
         return ImprintSerializers.estimateSize(typeCode, fieldValue.value);
     }
 
@@ -305,11 +267,57 @@ public final class ImprintRecordBuilder {
 
 
     /**
+     * Serialize using growable buffer - eliminates size guessing and retry logic.
+     * Uses growable buffer that automatically expands as needed during serialization.
+     * //TODO: we have multiple places where we write header/directory and we should probably consolidate that
+     */
+    private ByteBuffer serializeToBuffer(SchemaId schemaId, short[] sortedKeys, Object[] sortedValues,
+                                         int fieldCount, int conservativePayloadSize, int directorySize) throws ImprintException {
+        
+        // Start with conservative estimate, let buffer grow as needed
+        int initialSize = Constants.HEADER_BYTES + directorySize + conservativePayloadSize;
+        var buffer = ImprintBuffer.growable(initialSize);
+        
+        // Reserve space for header and directory - write payload first
+        int headerAndDirSize = Constants.HEADER_BYTES + directorySize;
+        buffer.position(headerAndDirSize);
+        
+        // Serialize payload and collect offsets - buffer will grow automatically
+        int[] offsets = new int[fieldCount];
+        for (int i = 0; i < fieldCount; i++) {
+            var fieldValue = (FieldValue) sortedValues[i];
+            offsets[i] = buffer.position() - headerAndDirSize; // Offset relative to payload start
+            serializeFieldValue(fieldValue, buffer);
+        }
+        
+        int actualPayloadSize = buffer.position() - headerAndDirSize;
+        
+        // Now write header and directory at the beginning
+        buffer.position(0);
+        
+        // Write header with actual payload size
+        buffer.putByte(Constants.MAGIC);
+        buffer.putByte(Constants.VERSION);
+        buffer.putByte((byte) 0); // flags
+        buffer.putInt(schemaId.getFieldSpaceId());
+        buffer.putInt(schemaId.getSchemaHash());
+        buffer.putInt(actualPayloadSize);
+        
+        // Write directory
+        writeDirectoryToBuffer(sortedKeys, sortedValues, offsets, fieldCount, buffer);
+        
+        // Set final limit and prepare for reading
+        int finalSize = Constants.HEADER_BYTES + directorySize + actualPayloadSize;
+        buffer.position(0);
+        buffer.limit(finalSize);
+        
+        return buffer.toByteBuffer().asReadOnlyBuffer();
+    }
+
+    /**
+     * Legacy serialization method with retry logic - kept for compatibility.
      * Serialize directly to a single buffer with conservative size multiplier.
-     * Writes payload first, then backfills header and directory. The positioning here is kind of
-     * tricky but it allows us to write to a single buffer as opposed to merging multiple ones together
-     * to form the header and directories.
-     * //TODO kind of an overload method with 7 inputs despite being performant
+     * Writes payload first, then backfills header and directory.
      */
     private ByteBuffer serializeToSingleBuffer(SchemaId schemaId, short[] sortedKeys, Object[] sortedValues, int fieldCount, int conservativePayloadSize, int directorySize,
                                                int sizeMultiplier) throws ImprintException {

@@ -15,11 +15,7 @@ import lombok.experimental.NonFinal;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.NoSuchElementException;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * Imprint Record
@@ -281,12 +277,12 @@ public class ImprintRecord {
     /**
      * Get and validate a field exists, is not null, and has the expected type.
      */
-    private Object getTypedPrimitive(int fieldId, com.imprint.types.TypeCode expectedTypeCode, String typeName) throws ImprintException {
+    private Object getTypedPrimitive(int fieldId, TypeCode expectedTypeCode, String typeName) throws ImprintException {
         var entry = getDirectoryView().findEntry(fieldId);
         if (entry == null)
             throw new ImprintException(ErrorType.FIELD_NOT_FOUND, "Field " + fieldId + " not found");
 
-        if (entry.getTypeCode() == com.imprint.types.TypeCode.NULL)
+        if (entry.getTypeCode() == TypeCode.NULL)
             throw new ImprintException(ErrorType.TYPE_MISMATCH, "Field " + fieldId + " is NULL, cannot retrieve as " + typeName);
 
         if (entry.getTypeCode() != expectedTypeCode)
@@ -623,12 +619,12 @@ public class ImprintRecord {
         }
     }
 
-    private java.util.List<Object> deserializePrimitiveArray(ByteBuffer buffer) throws ImprintException {
+    private List<Object> deserializePrimitiveArray(ByteBuffer buffer) throws ImprintException {
         VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
         int length = lengthResult.getValue();
 
         if (length == 0) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
 
         if (buffer.remaining() < 1) {
@@ -654,12 +650,12 @@ public class ImprintRecord {
         return elements;
     }
 
-    private java.util.Map<Object, Object> deserializePrimitiveMap(ByteBuffer buffer) throws ImprintException {
+    private Map<Object, Object> deserializePrimitiveMap(ByteBuffer buffer) throws ImprintException {
         VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
         int length = lengthResult.getValue();
 
         if (length == 0) {
-            return java.util.Collections.emptyMap();
+            return Collections.emptyMap();
         }
 
         if (buffer.remaining() < 2) {
@@ -667,7 +663,7 @@ public class ImprintRecord {
         }
         var keyType = TypeCode.fromByte(buffer.get());
         var valueType = TypeCode.fromByte(buffer.get());
-        var map = new java.util.HashMap<>(length);
+        var map = new HashMap<>(length);
 
         for (int i = 0; i < length; i++) {
             var keyPrimitive = ImprintDeserializers.deserializePrimitive(buffer, keyType);
@@ -682,7 +678,6 @@ public class ImprintRecord {
             } else {
                 valuePrimitive = ImprintDeserializers.deserializePrimitive(buffer, valueType);
             }
-            
             map.put(keyPrimitive, valuePrimitive);
         }
 

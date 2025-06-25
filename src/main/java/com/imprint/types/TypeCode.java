@@ -38,9 +38,9 @@ public enum TypeCode {
     public static TypeCode fromByte(byte code) throws ImprintException {
         if (code >= 0 && code < LOOKUP.length) {
             var type = LOOKUP[code];
-            if (type != null) return type;
+            if (type != null)
+                return type;
         }
-        throw new ImprintException(ErrorType.INVALID_TYPE_CODE,
-                "Unknown type code: 0x" + Integer.toHexString(code & 0xFF));
+        throw new ImprintException(ErrorType.INVALID_TYPE_CODE, "Unknown type code: 0x" + Integer.toHexString(code & 0xFF));
     }
 }
