@@ -4,6 +4,7 @@ import com.imprint.core.Directory;
 import com.imprint.core.ImprintRecord;
 import com.imprint.core.SchemaId;
 import com.imprint.error.ImprintException;
+import com.imprint.util.ImprintBuffer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -576,7 +577,7 @@ class ImprintOperationsTest {
             assertThrows(Exception.class, () -> 
                 ImprintOperations.mergeBytes(validBuffer, null));
             assertThrows(Exception.class, () -> 
-                ImprintOperations.projectBytes((ByteBuffer)null, 1, 2, 3));
+                ImprintOperations.projectBytes(null, 1, 2, 3));
         }
 
         @Test
@@ -588,9 +589,9 @@ class ImprintOperationsTest {
             var validBuffer = validRecord.serializeToBuffer();
 
             // Test invalid magic byte
-            var invalidMagic = ByteBuffer.allocate(20);
-            invalidMagic.put((byte) 0x99); // Invalid magic
-            invalidMagic.put((byte) 0x01); // Valid version
+            var invalidMagic = ImprintBuffer.wrap(ByteBuffer.allocate(20));
+            invalidMagic.putByte((byte) 0x99); // Invalid magic
+            invalidMagic.putByte((byte) 0x01); // Valid version
             invalidMagic.flip();
             
             assertThrows(ImprintException.class, () -> 
@@ -599,8 +600,8 @@ class ImprintOperationsTest {
                 ImprintOperations.projectBytes(invalidMagic, 1));
 
             // Test buffer too small
-            var tooSmall = ByteBuffer.allocate(5);
-            tooSmall.put(new byte[]{1, 2, 3, 4, 5});
+            var tooSmall = ImprintBuffer.wrap(ByteBuffer.allocate(5));
+            tooSmall.putBytes(new byte[]{1, 2, 3, 4, 5});
             tooSmall.flip();
             
             assertThrows(ImprintException.class, () -> 
@@ -609,9 +610,9 @@ class ImprintOperationsTest {
                 ImprintOperations.projectBytes(tooSmall, 1));
 
             // Test invalid version
-            var invalidVersion = ByteBuffer.allocate(20);
-            invalidVersion.put((byte) 0x49); // Valid magic
-            invalidVersion.put((byte) 0x99); // Invalid version
+            var invalidVersion = ImprintBuffer.wrap(ByteBuffer.allocate(20));
+            invalidVersion.putByte((byte) 0x49); // Valid magic
+            invalidVersion.putByte((byte) 0x99); // Invalid version
             invalidVersion.flip();
             
             assertThrows(ImprintException.class, () -> 

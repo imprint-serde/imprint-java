@@ -70,8 +70,7 @@ class ImprintBufferTest {
         
         // Verify VarInt encoding matches our VarInt utility
         buffer.position(0);
-        ByteBuffer compareBuffer = ByteBuffer.allocate(64);
-        compareBuffer.order(ByteOrder.LITTLE_ENDIAN);
+        var compareBuffer = ImprintBuffer.wrap(ByteBuffer.allocate(64));;
         VarInt.encode(300, compareBuffer);
         
         for (int i = 0; i < compareBuffer.position(); i++) {
@@ -91,14 +90,13 @@ class ImprintBufferTest {
         assertTrue(buffer.position() > testString.length());
         
         // Verify by reading back with ByteBuffer
-        ByteBuffer readBuffer = buffer.toByteBuffer();
-        readBuffer.position(0);
+        buffer.position(0);
         
-        VarInt.DecodeResult lengthResult = VarInt.decode(readBuffer);
+        VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
         assertEquals(testString.getBytes().length, lengthResult.getValue());
         
         byte[] stringBytes = new byte[lengthResult.getValue()];
-        readBuffer.get(stringBytes);
+        buffer.get(stringBytes);
         assertEquals(testString, new String(stringBytes));
     }
     

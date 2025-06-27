@@ -15,28 +15,11 @@ import java.util.*;
 public class ImprintOperations {
 
     // ========== BACKWARD COMPATIBILITY CONVENIENCE METHODS ==========
-    
-    /**
-     * High-performance merge operation using SIMD-optimized operations.
-     * Converts ByteBuffer inputs to ImprintBuffer for maximum performance.
-     */
-    public static ByteBuffer mergeBytes(ByteBuffer firstBuffer, ByteBuffer secondBuffer) throws ImprintException {
-        return Merge.mergeBytes(firstBuffer, secondBuffer);
-    }
 
-    /**
-     * High-performance merge taking ImprintBuffer inputs for maximum performance.
-     */
     public static ImprintBuffer mergeBytes(ImprintBuffer firstBuffer, ImprintBuffer secondBuffer) throws ImprintException {
         return Merge.mergeBytes(firstBuffer, secondBuffer);
     }
 
-    /**
-     * Pure bytes-to-bytes projection operation that avoids all object creation.
-     */
-    public static ByteBuffer projectBytes(ByteBuffer sourceBuffer, int... fieldIds) throws ImprintException {
-        return Project.projectBytes(sourceBuffer, fieldIds);
-    }
 
     /**
      * High-performance projection taking ImprintBuffer inputs for maximum performance.
@@ -125,15 +108,17 @@ public class ImprintOperations {
          * Parse header directly from ImprintBuffer using SIMD-optimized reads.
          */
         static Header parseHeaderFromImprintBuffer(ImprintBuffer buffer) throws ImprintException {
-            buffer.position(0);
+            // Use duplicate to avoid modifying the original buffer
+            var headerBuffer = buffer.duplicate();
+            headerBuffer.position(0);
 
             // Read header components using ImprintBuffer's optimized operations
-            byte magic = buffer.get();
-            byte version = buffer.get();
-            byte flags = buffer.get();
-            int fieldSpaceId = buffer.getInt();
-            int schemaHash = buffer.getInt();
-            int payloadSize = buffer.getInt();
+            byte magic = headerBuffer.get();
+            byte version = headerBuffer.get();
+            byte flags = headerBuffer.get();
+            int fieldSpaceId = headerBuffer.getInt();
+            int schemaHash = headerBuffer.getInt();
+            int payloadSize = headerBuffer.getInt();
 
             if (magic != Constants.MAGIC) {
                 throw new ImprintException(ErrorType.INVALID_BUFFER, "Invalid magic byte");
@@ -149,20 +134,22 @@ public class ImprintOperations {
          * Extract directory and payload sections directly from ImprintBuffer.
          */
         static ImprintBufferSections extractSectionsFromImprintBuffer(ImprintBuffer buffer, Header header) {
-            buffer.position(Constants.HEADER_BYTES);
+            // Use duplicate to avoid modifying the original buffer
+            var workingBuffer = buffer.duplicate();
+            workingBuffer.position(Constants.HEADER_BYTES);
 
             // Read directory count using ImprintBuffer's VarInt operations
-            int directoryCount = buffer.getVarInt();
-            int directoryStart = buffer.position();
+            int directoryCount = workingBuffer.getVarInt();
+            int directoryStart = workingBuffer.position();
             int directorySize = directoryCount * Constants.DIR_ENTRY_BYTES;
             int payloadStart = directoryStart + directorySize;
 
             // Create sliced buffers for directory and payload
-            var directoryBuffer = buffer.slice();
+            var directoryBuffer = workingBuffer.slice();
             directoryBuffer.limit(directorySize);
 
-            buffer.position(payloadStart);
-            var payloadBuffer = buffer.slice();
+            workingBuffer.position(payloadStart);
+            var payloadBuffer = workingBuffer.slice();
             payloadBuffer.limit(header.getPayloadSize());
 
             return new ImprintBufferSections(directoryBuffer, payloadBuffer, directoryCount);
@@ -176,16 +163,26 @@ public class ImprintOperations {
                 throw new ImprintException(ErrorType.INVALID_BUFFER, paramName + " cannot be null");
             }
 
+            // Debug: Log validation details for small buffers
+            if (buffer.remaining() <= Constants.HEADER_BYTES) {
+                System.err.println("DEBUG: validateImprintBuffer() - " + paramName + " validation details:");
+                System.err.println("  buffer.remaining()=" + buffer.remaining());
+                System.err.println("  buffer.position()=" + buffer.position());
+                System.err.println("  buffer.limit()=" + buffer.limit());
+                System.err.println("  buffer.capacity()=" + buffer.capacity());
+                System.err.println("  Constants.HEADER_BYTES=" + Constants.HEADER_BYTES);
+            }
+
             if (buffer.remaining() < Constants.HEADER_BYTES) {
                 throw new ImprintException(ErrorType.INVALID_BUFFER,
                         paramName + " too small to contain valid Imprint header (minimum " + Constants.HEADER_BYTES + " bytes)");
             }
 
-            // Check magic and version using ImprintBuffer operations
-            int savedPos = buffer.position();
-            byte magic = buffer.get();
-            byte version = buffer.get();
-            buffer.position(savedPos);
+            // Check magic and version using ImprintBuffer operations without modifying original buffer
+            var validationBuffer = buffer.duplicate();
+            validationBuffer.position(0);
+            byte magic = validationBuffer.get();
+            byte version = validationBuffer.get();
 
             if (magic != Constants.MAGIC) {
                 throw new ImprintException(ErrorType.INVALID_BUFFER, paramName + " does not contain valid Imprint magic byte");
@@ -304,16 +301,48 @@ public class ImprintOperations {
          * Eliminates ByteBuffer conversion overhead and enables end-to-end operations.
          */
         public static ImprintBuffer mergeBytes(ImprintBuffer firstBuffer, ImprintBuffer secondBuffer) throws ImprintException {
+            // Debug: Log buffer state before validation for small buffers
+            if (firstBuffer.remaining() <= 20) {
+                System.err.println("DEBUG: mergeBytes() - firstBuffer before validation:");
+                System.err.println("  firstBuffer.remaining()=" + firstBuffer.remaining());
+                System.err.println("  firstBuffer.position()=" + firstBuffer.position());
+                System.err.println("  firstBuffer.limit()=" + firstBuffer.limit());
+            }
+            
             Core.validateImprintBuffer(firstBuffer, "firstBuffer");
             Core.validateImprintBuffer(secondBuffer, "secondBuffer");
+
+            // Debug: Log buffer state after validation
+            if (firstBuffer.remaining() <= 20) {
+                System.err.println("DEBUG: mergeBytes() - firstBuffer after validation:");
+                System.err.println("  firstBuffer.remaining()=" + firstBuffer.remaining());
+                System.err.println("  firstBuffer.position()=" + firstBuffer.position());
+                System.err.println("  firstBuffer.limit()=" + firstBuffer.limit());
+            }
 
             // Parse headers directly from ImprintBuffer (faster than ByteBuffer)
             var firstHeader = Core.parseHeaderFromImprintBuffer(firstBuffer);
             var secondHeader = Core.parseHeaderFromImprintBuffer(secondBuffer);
 
+            // Debug: Log buffer state after header parsing
+            if (firstBuffer.remaining() <= 20) {
+                System.err.println("DEBUG: mergeBytes() - firstBuffer after header parsing:");
+                System.err.println("  firstBuffer.remaining()=" + firstBuffer.remaining());
+                System.err.println("  firstBuffer.position()=" + firstBuffer.position());
+                System.err.println("  firstBuffer.limit()=" + firstBuffer.limit());
+            }
+
             // Extract sections using ImprintBuffer operations
             var firstSections = Core.extractSectionsFromImprintBuffer(firstBuffer, firstHeader);
             var secondSections = Core.extractSectionsFromImprintBuffer(secondBuffer, secondHeader);
+
+            // Debug: Log buffer state after section extraction
+            if (firstBuffer.remaining() <= 20) {
+                System.err.println("DEBUG: mergeBytes() - firstBuffer after section extraction:");
+                System.err.println("  firstBuffer.remaining()=" + firstBuffer.remaining());
+                System.err.println("  firstBuffer.position()=" + firstBuffer.position());
+                System.err.println("  firstBuffer.limit()=" + firstBuffer.limit());
+            }
 
             // Perform high-performance merge
             return mergeRawSections(firstHeader, firstSections, secondSections);

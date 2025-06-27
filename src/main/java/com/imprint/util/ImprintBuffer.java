@@ -676,6 +676,89 @@ public final class ImprintBuffer {
     }
     
     @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+        
+        ImprintBuffer other = (ImprintBuffer) obj;
+        
+        // Quick checks first
+        if (remaining() != other.remaining()) return false;
+        
+        // Save positions
+        int thisPos = this.position;
+        int otherPos = other.position;
+        
+        try {
+            // Compare byte by byte from current positions
+            while (hasRemaining() && other.hasRemaining()) {
+                if (get() != other.get()) {
+                    return false;
+                }
+            }
+            return true;
+        } finally {
+            // Restore positions
+            this.position = thisPos;
+            other.position = otherPos;
+        }
+    }
+    
+    @Override
+    public int hashCode() {
+        int h = 1;
+        int savedPos = position;
+        try {
+            while (hasRemaining()) {
+                h = 31 * h + get();
+            }
+            return h;
+        } finally {
+            position = savedPos;
+        }
+    }
+    
+    // ========== BYTEBUFFER COMPATIBILITY METHODS ==========
+    
+    /**
+     * Clear the buffer (set position to 0, limit to capacity).
+     */
+    public ImprintBuffer clear() {
+        position = 0;
+        limit = capacity;
+        return this;
+    }
+    
+    /**
+     * Rewind the buffer (set position to 0).
+     */
+    public ImprintBuffer rewind() {
+        position = 0;
+        return this;
+    }
+    
+    /**
+     * Put a single byte (ByteBuffer compatibility).
+     */
+    public ImprintBuffer put(byte b) {
+        return putByte(b);
+    }
+    
+    /**
+     * Put a byte array (ByteBuffer compatibility).
+     */
+    public ImprintBuffer put(byte[] src) {
+        return putBytes(src);
+    }
+    
+    /**
+     * Put a portion of byte array (ByteBuffer compatibility).
+     */
+    public ImprintBuffer put(byte[] src, int offset, int length) {
+        return putBytes(src, offset, length);
+    }
+    
+    @Override
     public String toString() {
         return "ImprintBuffer{position=" + position + ", capacity=" + capacity + "}";
     }

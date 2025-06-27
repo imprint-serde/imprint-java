@@ -16,7 +16,7 @@ class VarIntTest {
         };
         
         for (int value : testCases) {
-            ByteBuffer buffer = ByteBuffer.allocate(10);
+            var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(10));
             VarInt.encode(value, buffer);
             int encodedLength = buffer.position();
             
@@ -40,7 +40,7 @@ class VarIntTest {
     }
     
     private void assertEncodedBytes(int value, int... expectedBytes) {
-        ByteBuffer buffer = ByteBuffer.allocate(10);
+        var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(10));
         VarInt.encode(value, buffer);
         buffer.flip();
         
@@ -57,7 +57,7 @@ class VarIntTest {
     
     @Test
     void shouldWorkWithByteBuffer() throws ImprintException {
-        ByteBuffer buffer = ByteBuffer.allocate(10);
+        var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(10));
         VarInt.encode(16384, buffer);
         
         buffer.flip();
@@ -79,8 +79,8 @@ class VarIntTest {
     
     @Test
     void shouldHandleBufferUnderflow() {
-        ByteBuffer buffer = ByteBuffer.allocate(1);
-        buffer.put((byte) 0x80); // incomplete varint
+        var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(1));
+        buffer.putByte((byte) 0x80); // incomplete varint
         buffer.flip();
         
         assertThatThrownBy(() -> VarInt.decode(buffer))
@@ -91,8 +91,8 @@ class VarIntTest {
     
     @Test
     void shouldHandleOverlongEncoding() {
-        ByteBuffer buffer = ByteBuffer.allocate(10);
-        buffer.put(new byte[]{(byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, 0x01});
+        var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(10));
+        buffer.putBytes(new byte[]{(byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, 0x01});
         buffer.flip();
         
         assertThatThrownBy(() -> VarInt.decode(buffer))
@@ -103,8 +103,8 @@ class VarIntTest {
     
     @Test
     void shouldHandleOverflow() {
-        ByteBuffer buffer = ByteBuffer.allocate(10);
-        buffer.put(new byte[]{(byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, 0x10});
+        var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(10));
+        buffer.putBytes(new byte[]{(byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, 0x10});
         buffer.flip();
         
         assertThatThrownBy(() -> VarInt.decode(buffer))

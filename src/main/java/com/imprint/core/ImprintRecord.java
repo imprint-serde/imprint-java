@@ -4,9 +4,10 @@ import com.imprint.Constants;
 import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import com.imprint.ops.ImprintOperations;
-import com.imprint.types.*;
+import com.imprint.types.ImprintDeserializers;
+import com.imprint.types.TypeCode;
+import com.imprint.util.ImprintBuffer;
 import com.imprint.util.VarInt;
-
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -14,7 +15,6 @@ import lombok.ToString;
 import lombok.experimental.NonFinal;
 
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.*;
 
 /**
@@ -29,18 +29,18 @@ import java.util.*;
 @EqualsAndHashCode(of = "serializedBytes")
 @ToString(of = {"header"})
 public class ImprintRecord {
-    ByteBuffer serializedBytes;
+    ImprintBuffer serializedBytes;
 
     @Getter(AccessLevel.PUBLIC)
     Header header;
 
     @Getter(AccessLevel.PACKAGE)
     // Raw directory bytes (read-only)
-    ByteBuffer directoryBuffer;
+    ImprintBuffer directoryBuffer;
 
     @Getter(AccessLevel.PACKAGE)
     // Raw payload bytes
-    ByteBuffer payload;
+    ImprintBuffer payload;
 
     @NonFinal
     @Getter(AccessLevel.NONE)
@@ -50,8 +50,24 @@ public class ImprintRecord {
     /**
      * Package-private constructor for @Value that creates immutable ByteBuffer views.
      */
-    ImprintRecord(ByteBuffer serializedBytes, Header header, ByteBuffer directoryBuffer, ByteBuffer payload) {
+    ImprintRecord(ImprintBuffer serializedBytes, Header header, ImprintBuffer directoryBuffer, ImprintBuffer payload) {
+        // Debug: Log buffer details for empty records during construction
+        if (serializedBytes.remaining() <= 16) {  // Log for small buffers
+            System.err.println("DEBUG: ImprintRecord constructor - buffer details:");
+            System.err.println("  input serializedBytes.remaining()=" + serializedBytes.remaining());
+            System.err.println("  input serializedBytes.position()=" + serializedBytes.position());
+            System.err.println("  input serializedBytes.limit()=" + serializedBytes.limit());
+        }
+        
         this.serializedBytes = serializedBytes.asReadOnlyBuffer();
+        
+        // Debug: Log buffer details after asReadOnlyBuffer()
+        if (this.serializedBytes.remaining() <= 16) {  // Log for small buffers
+            System.err.println("  after asReadOnlyBuffer().remaining()=" + this.serializedBytes.remaining());
+            System.err.println("  after asReadOnlyBuffer().position()=" + this.serializedBytes.position());
+            System.err.println("  after asReadOnlyBuffer().limit()=" + this.serializedBytes.limit());
+        }
+        
         this.header = Objects.requireNonNull(header);
         this.directoryBuffer = directoryBuffer.asReadOnlyBuffer();
         this.payload = payload.asReadOnlyBuffer();
@@ -84,20 +100,28 @@ public class ImprintRecord {
      * Deserialize an ImprintRecord from bytes.
      */
     public static ImprintRecord deserialize(byte[] bytes) throws ImprintException {
-        return fromBytes(ByteBuffer.wrap(bytes));
+        return fromBytes(new ImprintBuffer(bytes));
     }
 
-    public static ImprintRecord deserialize(ByteBuffer buffer) throws ImprintException {
+    public static ImprintRecord deserialize(ImprintBuffer buffer) throws ImprintException {
         return fromBytes(buffer);
     }
 
     /**
      * Create a ImprintRecord from complete serialized bytes.
      */
-    public static ImprintRecord fromBytes(ByteBuffer serializedBytes) throws ImprintException {
+    public static ImprintRecord fromBytes(ImprintBuffer serializedBytes) throws ImprintException {
         Objects.requireNonNull(serializedBytes, "Serialized bytes cannot be null");
 
-        var buffer = serializedBytes.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+        // Debug: Log buffer details for empty records in fromBytes
+        if (serializedBytes.remaining() <= 16) {  // Log for small buffers
+            System.err.println("DEBUG: ImprintRecord.fromBytes() - input buffer details:");
+            System.err.println("  input serializedBytes.remaining()=" + serializedBytes.remaining());
+            System.err.println("  input serializedBytes.position()=" + serializedBytes.position());
+            System.err.println("  input serializedBytes.limit()=" + serializedBytes.limit());
+        }
+
+        var buffer = serializedBytes.duplicate();
 
         // Parse header
         var header = parseHeader(buffer);
@@ -116,7 +140,7 @@ public class ImprintRecord {
      * Results in a new ImprintRecord without any object creation.
      */
     public ImprintRecord merge(ImprintRecord other) throws ImprintException {
-        var mergedBytes = ImprintOperations.mergeBytes(this.serializedBytes, other.serializedBytes);
+        var mergedBytes = ImprintOperations.mergeBytes(this.getSerializedBytes(), other.getSerializedBytes());
         return fromBytes(mergedBytes);
     }
 
@@ -125,7 +149,7 @@ public class ImprintRecord {
      * Results in a new ImprintRecord without any object creation.
      */
     public ImprintRecord project(int... fieldIds) throws ImprintException {
-        var projectedBytes = ImprintOperations.projectBytes(this.serializedBytes, fieldIds);
+        var projectedBytes = ImprintOperations.projectBytes(this.getSerializedBytes(), fieldIds);
         return fromBytes(projectedBytes);
     }
 
@@ -141,8 +165,10 @@ public class ImprintRecord {
      * Get the raw serialized bytes.
      * This is the most efficient way to pass the record around.
      */
-    public ByteBuffer getSerializedBytes() {
-        return serializedBytes.duplicate();
+    public ImprintBuffer getSerializedBytes() {
+        var buffer = serializedBytes.duplicate();
+        buffer.position(0);
+        return buffer;
     }
 
     /**
@@ -165,7 +191,7 @@ public class ImprintRecord {
     /**
      * Get raw bytes for a field without deserializing.
      */
-    public ByteBuffer getRawBytes(int fieldId) {
+    public ImprintBuffer getRawBytes(int fieldId) {
         try {
             return getFieldBuffer(fieldId);
         } catch (ImprintException e) {
@@ -176,7 +202,7 @@ public class ImprintRecord {
     /**
      * Get raw bytes for a field by short ID.
      */
-    public ByteBuffer getRawBytes(short fieldId) {
+    public ImprintBuffer getRawBytes(short fieldId) {
         return getRawBytes((int) fieldId);
     }
 
@@ -255,8 +281,41 @@ public class ImprintRecord {
     /**
      * Returns a copy of the bytes.
      */
-    public ByteBuffer serializeToBuffer() {
-        return serializedBytes.duplicate();
+    public ImprintBuffer serializeToBuffer() {
+        // Debug: Log original buffer state
+        if (serializedBytes.remaining() <= 20) {  // Log for small buffers
+            System.err.println("DEBUG: serializeToBuffer() - original serializedBytes:");
+            System.err.println("  serializedBytes.remaining()=" + serializedBytes.remaining());
+            System.err.println("  serializedBytes.position()=" + serializedBytes.position());
+            System.err.println("  serializedBytes.limit()=" + serializedBytes.limit());
+        }
+        
+        var buffer = serializedBytes.duplicate();
+        
+        // Debug: Log after duplicate
+        if (buffer.remaining() <= 20) {  // Log for small buffers
+            System.err.println("  after duplicate().remaining()=" + buffer.remaining());
+            System.err.println("  after duplicate().position()=" + buffer.position());
+            System.err.println("  after duplicate().limit()=" + buffer.limit());
+        }
+        
+        buffer.position(0);
+        
+        // Debug: Log after position(0)
+        if (buffer.remaining() <= 20) {  // Log for small buffers
+            System.err.println("  after position(0).remaining()=" + buffer.remaining());
+            System.err.println("  after position(0).position()=" + buffer.position());
+            System.err.println("  after position(0).limit()=" + buffer.limit());
+        }
+        
+        // Debug: Log buffer size for empty records  
+        if (buffer.remaining() < Constants.HEADER_BYTES) {
+            System.err.println("WARNING: serializeToBuffer() returning undersized buffer: " + 
+                              buffer.remaining() + " bytes (minimum " + Constants.HEADER_BYTES + " required)");
+            System.err.println("Buffer details: position=" + buffer.position() + ", limit=" + buffer.limit() + ", capacity=" + buffer.capacity());
+        }
+        
+        return buffer;
     }
 
     /**
@@ -298,8 +357,8 @@ public class ImprintRecord {
     /**
      * Parse buffers from serialized record bytes.
      */
-    private static ParsedBuffers parseBuffersFromSerialized(ByteBuffer serializedRecord) throws ImprintException {
-        var buffer = serializedRecord.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+    private static ParsedBuffers parseBuffersFromSerialized(ImprintBuffer serializedRecord) throws ImprintException {
+        var buffer = serializedRecord.duplicate();
 
         // Parse header and extract sections using shared utility
         var header = parseHeaderFromBuffer(buffer);
@@ -309,10 +368,10 @@ public class ImprintRecord {
     }
 
     private static class ParsedBuffers {
-        final ByteBuffer directoryBuffer;
-        final ByteBuffer payload;
+        final ImprintBuffer directoryBuffer;
+        final ImprintBuffer payload;
 
-        ParsedBuffers(ByteBuffer directoryBuffer, ByteBuffer payload) {
+        ParsedBuffers(ImprintBuffer directoryBuffer, ImprintBuffer payload) {
             this.directoryBuffer = directoryBuffer;
             this.payload = payload;
         }
@@ -329,7 +388,7 @@ public class ImprintRecord {
     /**
      * Gets ByteBuffer view of a field's data.
      */
-    private ByteBuffer getFieldBuffer(int fieldId) throws ImprintException {
+    private ImprintBuffer getFieldBuffer(int fieldId) throws ImprintException {
         var entry = findDirectoryEntry(fieldId);
         if (entry == null)
             return null;
@@ -348,7 +407,7 @@ public class ImprintRecord {
     }
 
     private Directory findDirectoryEntry(int fieldId) throws ImprintException {
-        var searchBuffer = directoryBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+        var searchBuffer = directoryBuffer.duplicate();
 
         int count = getDirectoryCount();
         if (count == 0) return null;
@@ -385,7 +444,7 @@ public class ImprintRecord {
     }
 
     private int findEndOffset(int currentFieldId) throws ImprintException {
-        var scanBuffer = directoryBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+        var scanBuffer = directoryBuffer.duplicate();
 
         int count = getDirectoryCount();
         if (count == 0) return payload.limit();
@@ -421,7 +480,7 @@ public class ImprintRecord {
         return nextOffset;
     }
 
-    private Directory deserializeDirectoryEntry(ByteBuffer buffer) throws ImprintException {
+    private Directory deserializeDirectoryEntry(ImprintBuffer buffer) throws ImprintException {
         if (buffer.remaining() < Constants.DIR_ENTRY_BYTES)
             throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for directory entry");
 
@@ -475,12 +534,12 @@ public class ImprintRecord {
      * Iterator that parses directory entries lazily from raw bytes.
      */
     private class ImprintDirectoryIterator implements Iterator<Directory> {
-        private final ByteBuffer iterBuffer;
+        private final ImprintBuffer iterBuffer;
         private final int totalCount;
         private int currentIndex;
 
         ImprintDirectoryIterator() {
-            this.iterBuffer = directoryBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+            this.iterBuffer = directoryBuffer.duplicate();
             this.totalCount = getDirectoryCount();
 
             try {
@@ -517,7 +576,7 @@ public class ImprintRecord {
      * Parse a header from a ByteBuffer without advancing the buffer position.
      * Utility method shared between {@link ImprintRecord} and {@link ImprintOperations}.
      */
-    public static Header parseHeaderFromBuffer(ByteBuffer buffer) throws ImprintException {
+    public static Header parseHeaderFromBuffer(ImprintBuffer buffer) throws ImprintException {
         int startPos = buffer.position();
         try {
             return parseHeader(buffer);
@@ -538,11 +597,11 @@ public class ImprintRecord {
      * Utility class shared between {@link ImprintRecord} and {@link ImprintOperations}.
      */
     public static class BufferSections {
-        public final ByteBuffer directoryBuffer;
-        public final ByteBuffer payloadBuffer;
+        public final ImprintBuffer directoryBuffer;
+        public final ImprintBuffer payloadBuffer;
         public final int directoryCount;
 
-        public BufferSections(ByteBuffer directoryBuffer, ByteBuffer payloadBuffer, int directoryCount) {
+        public BufferSections(ImprintBuffer directoryBuffer, ImprintBuffer payloadBuffer, int directoryCount) {
             this.directoryBuffer = directoryBuffer;
             this.payloadBuffer = payloadBuffer;
             this.directoryCount = directoryCount;
@@ -553,7 +612,7 @@ public class ImprintRecord {
      * Extract directory and payload sections from a serialized buffer.
      * Utility method shared between {@link ImprintRecord} and {@link ImprintOperations}.
      */
-    public static BufferSections extractBufferSections(ByteBuffer buffer, Header header) throws ImprintException {
+    public static BufferSections extractBufferSections(ImprintBuffer buffer, Header header) throws ImprintException {
         // Skip header
         buffer.position(buffer.position() + Constants.HEADER_BYTES);
 
@@ -576,7 +635,7 @@ public class ImprintRecord {
         return new BufferSections(directoryBuffer, payloadBuffer, directoryCount);
     }
 
-    private static Header parseHeader(ByteBuffer buffer) throws ImprintException {
+    private static Header parseHeader(ImprintBuffer buffer) throws ImprintException {
         if (buffer.remaining() < Constants.HEADER_BYTES)
             throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for header");
 
@@ -596,8 +655,8 @@ public class ImprintRecord {
         return new Header(flags, new SchemaId(fieldSpaceId, schemaHash), payloadSize);
     }
 
-    private Object deserializePrimitive(com.imprint.types.TypeCode typeCode, ByteBuffer buffer) throws ImprintException {
-        var valueBuffer = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+    private Object deserializePrimitive(com.imprint.types.TypeCode typeCode, ImprintBuffer buffer) throws ImprintException {
+        var valueBuffer = buffer.duplicate();
         switch (typeCode) {
             case NULL:
             case BOOL:
@@ -619,7 +678,7 @@ public class ImprintRecord {
         }
     }
 
-    private List<Object> deserializePrimitiveArray(ByteBuffer buffer) throws ImprintException {
+    private List<Object> deserializePrimitiveArray(ImprintBuffer buffer) throws ImprintException {
         VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
         int length = lengthResult.getValue();
 
@@ -650,7 +709,7 @@ public class ImprintRecord {
         return elements;
     }
 
-    private Map<Object, Object> deserializePrimitiveMap(ByteBuffer buffer) throws ImprintException {
+    private Map<Object, Object> deserializePrimitiveMap(ImprintBuffer buffer) throws ImprintException {
         VarInt.DecodeResult lengthResult = VarInt.decode(buffer);
         int length = lengthResult.getValue();
 

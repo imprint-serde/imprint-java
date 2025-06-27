@@ -40,7 +40,7 @@ public final class VarInt {
      * @param value the value to encode (treated as unsigned)
      * @param buffer the buffer to write to
      */
-    public static void encode(int value, ByteBuffer buffer) {
+    public static void encode(int value, ImprintBuffer buffer) {
         // Convert to unsigned long for proper bit manipulation
         long val = Integer.toUnsignedLong(value);
         // Encode at least one byte, then continue while value has more bits
@@ -49,7 +49,7 @@ public final class VarInt {
             val >>>= 7;
             if (val != 0)
                 b |= CONTINUATION_BIT;
-            buffer.put(b);
+            buffer.putByte(b);
         } while (val != 0);
     }
 
@@ -59,7 +59,7 @@ public final class VarInt {
      * @return a DecodeResult containing the decoded value and number of bytes consumed
      * @throws ImprintException if the VarInt is malformed
      */
-    public static DecodeResult decode(ByteBuffer buffer) throws ImprintException {
+    public static DecodeResult decode(ImprintBuffer buffer) throws ImprintException {
         long result = 0;
         int shift = 0;
         int bytesRead = 0;

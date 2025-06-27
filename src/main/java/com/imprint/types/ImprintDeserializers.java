@@ -2,6 +2,7 @@ package com.imprint.types;
 
 import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
+import com.imprint.util.ImprintBuffer;
 import com.imprint.util.VarInt;
 import lombok.experimental.UtilityClass;
 
@@ -15,7 +16,7 @@ import java.nio.ByteBuffer;
 public final class ImprintDeserializers {
     
     // Primitive deserializers
-    public static Object deserializePrimitive(ByteBuffer buffer, TypeCode typeCode) throws ImprintException {
+    public static Object deserializePrimitive(ImprintBuffer buffer, TypeCode typeCode) throws ImprintException {
         switch (typeCode) {
             case NULL:
                 return null;

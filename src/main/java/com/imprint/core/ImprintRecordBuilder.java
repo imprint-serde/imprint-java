@@ -7,6 +7,7 @@ import com.imprint.types.ImprintSerializers;
 import com.imprint.types.MapKey;
 import com.imprint.types.TypeCode;
 import com.imprint.util.ImprintBuffer;
+import com.imprint.util.VarInt;
 import lombok.SneakyThrows;
 import lombok.Value;
 
@@ -140,8 +141,8 @@ public final class ImprintRecordBuilder {
     // Build the final record
     public ImprintRecord build() throws ImprintException {
         // Build to bytes and then create ImprintRecord from bytes for consistency
-        var serializedBytes = buildToBuffer();
-        return ImprintRecord.fromBytes(serializedBytes);
+        var buffer = buildToBuffer();
+        return ImprintRecord.fromBytes(buffer);
     }
 
     /**
@@ -150,7 +151,7 @@ public final class ImprintRecordBuilder {
      * @return A read-only ByteBuffer containing the fully serialized record.
      * @throws ImprintException if serialization fails.
      */
-    public ByteBuffer buildToBuffer() throws ImprintException {
+    public ImprintBuffer buildToBuffer() throws ImprintException {
         // 1. Calculate conservative size BEFORE sorting (which invalidates the map)
         int conservativeSize = calculateConservativePayloadSize();
 
@@ -162,6 +163,14 @@ public final class ImprintRecordBuilder {
 
         // 3. Calculate directory size
         int directorySize = ImprintRecord.calculateDirectorySize(fieldCount);
+        
+        // Debug: Log directory size calculation for empty records
+        if (fieldCount == 0) {
+            System.err.println("DEBUG: Directory size calculation for empty record:");
+            System.err.println("  fieldCount=" + fieldCount);
+            System.err.println("  VarInt.encodedLength(" + fieldCount + ")=" + com.imprint.util.VarInt.encodedLength(fieldCount));
+            System.err.println("  calculated directorySize=" + directorySize);
+        }
         
         // 4. Use growable buffer to eliminate size guessing and retry logic
         return serializeToBuffer(schemaId, sortedKeys, sortedValues, fieldCount,
@@ -271,12 +280,12 @@ public final class ImprintRecordBuilder {
      * Uses growable buffer that automatically expands as needed during serialization.
      * //TODO: we have multiple places where we write header/directory and we should probably consolidate that
      */
-    private ByteBuffer serializeToBuffer(SchemaId schemaId, short[] sortedKeys, Object[] sortedValues,
+    private ImprintBuffer serializeToBuffer(SchemaId schemaId, short[] sortedKeys, Object[] sortedValues,
                                          int fieldCount, int conservativePayloadSize, int directorySize) throws ImprintException {
         
-        // Start with conservative estimate, let buffer grow as needed
+        // Start with conservative estimate, use fixed size buffer first
         int initialSize = Constants.HEADER_BYTES + directorySize + conservativePayloadSize;
-        var buffer = ImprintBuffer.growable(initialSize);
+        var buffer = new ImprintBuffer(new byte[initialSize * 2]); // Extra capacity to avoid growth
         
         // Reserve space for header and directory - write payload first
         int headerAndDirSize = Constants.HEADER_BYTES + directorySize;
@@ -308,10 +317,26 @@ public final class ImprintRecordBuilder {
         
         // Set final limit and prepare for reading
         int finalSize = Constants.HEADER_BYTES + directorySize + actualPayloadSize;
+        
+        // Debug: Log buffer creation details for empty records
+        if (fieldCount == 0) {
+            System.err.println("DEBUG: Empty record serialization details:");
+            System.err.println("  fieldCount=" + fieldCount);
+            System.err.println("  directorySize=" + directorySize);
+            System.err.println("  actualPayloadSize=" + actualPayloadSize);
+            System.err.println("  finalSize=" + finalSize);
+            System.err.println("  Constants.HEADER_BYTES=" + Constants.HEADER_BYTES);
+        }
+        
+        // Ensure minimum buffer size for validation (at least header size)
+        if (finalSize < Constants.HEADER_BYTES) {
+            throw new IllegalStateException("Buffer size (" + finalSize + ") is smaller than minimum header size (" + Constants.HEADER_BYTES + ")");
+        }
+        
         buffer.position(0);
         buffer.limit(finalSize);
         
-        return buffer.toByteBuffer().asReadOnlyBuffer();
+        return buffer.asReadOnlyBuffer();
     }
 
     /**
@@ -458,13 +483,8 @@ public final class ImprintRecordBuilder {
      * Write directory entries directly to buffer for FieldValue objects.
      */
     private static void writeDirectoryToBuffer(short[] sortedKeys, Object[] sortedValues, int[] offsets, int fieldCount, ImprintBuffer buffer) {
-        // Write field count at the beginning of directory
-        // VarInt encoding for common case (< 128 fields = single byte)
-        if (fieldCount < 128) {
-            buffer.putByte((byte) fieldCount);
-        } else {
-            buffer.putVarInt(fieldCount);
-        }
+        // Write field count using putVarInt for consistency with ImprintOperations
+        buffer.putVarInt(fieldCount);
 
         // Early return for empty directory
         if (fieldCount == 0)
