@@ -23,7 +23,8 @@ import java.util.concurrent.TimeUnit;
     "--add-opens=java.base/java.lang=ALL-UNNAMED",
     "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED", 
     "--add-opens=java.base/java.util=ALL-UNNAMED",
-    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"})
+    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+    "-Dimprint.buffer.bounds.check=false"})
 public class ComparisonBenchmark {
 
     private static final List<SerializingBenchmark> FRAMEWORKS = List.of(

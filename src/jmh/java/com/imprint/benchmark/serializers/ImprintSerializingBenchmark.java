@@ -7,8 +7,6 @@ import com.imprint.core.SchemaId;
 import com.imprint.error.ImprintException;
 import org.openjdk.jmh.infra.Blackhole;
 
-import java.nio.ByteBuffer;
-
 public class ImprintSerializingBenchmark extends AbstractSerializingBenchmark {
 
     private ImprintRecord imprintRecord1;
@@ -27,11 +25,11 @@ public class ImprintSerializingBenchmark extends AbstractSerializingBenchmark {
             this.imprintRecord1 = buildRecord(testRecord).build();
             ImprintRecord imprintRecord2 = buildRecord(testRecord2).build();
             
-            ByteBuffer buf1 = this.imprintRecord1.serializeToBuffer();
+            var buf1 = this.imprintRecord1.serializeToBuffer();
             this.serializedRecord1 = new byte[buf1.remaining()];
             buf1.get(this.serializedRecord1);
 
-            ByteBuffer buf2 = imprintRecord2.serializeToBuffer();
+            var buf2 = imprintRecord2.serializeToBuffer();
             this.serializedRecord2 = new byte[buf2.remaining()];
             buf2.get(this.serializedRecord2);
         } catch (ImprintException e) {
