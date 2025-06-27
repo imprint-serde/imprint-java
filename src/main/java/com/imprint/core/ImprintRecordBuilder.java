@@ -307,16 +307,6 @@ public final class ImprintRecordBuilder {
         // Set final limit and prepare for reading
         int finalSize = Constants.HEADER_BYTES + directorySize + actualPayloadSize;
         
-        // Debug: Log buffer creation details for empty records
-        if (fieldCount == 0) {
-            System.err.println("DEBUG: Empty record serialization details:");
-            System.err.println("  fieldCount=" + fieldCount);
-            System.err.println("  directorySize=" + directorySize);
-            System.err.println("  actualPayloadSize=" + actualPayloadSize);
-            System.err.println("  finalSize=" + finalSize);
-            System.err.println("  Constants.HEADER_BYTES=" + Constants.HEADER_BYTES);
-        }
-        
         // Ensure minimum buffer size for validation (at least header size)
         if (finalSize < Constants.HEADER_BYTES) {
             throw new IllegalStateException("Buffer size (" + finalSize + ") is smaller than minimum header size (" + Constants.HEADER_BYTES + ")");
