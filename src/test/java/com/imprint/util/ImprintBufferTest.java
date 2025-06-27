@@ -25,16 +25,14 @@ class ImprintBufferTest {
         // Verify position advanced correctly
         assertEquals(1 + 4 + 8 + 4 + 8, buffer.position());
         
-        // Convert to ByteBuffer and verify little-endian values
-        ByteBuffer byteBuffer = buffer.toByteBuffer();
-        byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-        byteBuffer.position(0);
+
+        buffer.position(0);
         
-        assertEquals((byte) 0x42, byteBuffer.get());
-        assertEquals(0x12345678, byteBuffer.getInt());
-        assertEquals(0x123456789ABCDEF0L, byteBuffer.getLong());
-        assertEquals(3.14f, byteBuffer.getFloat(), 0.001f);
-        assertEquals(2.718281828, byteBuffer.getDouble(), 0.000001);
+        assertEquals((byte) 0x42, buffer.get());
+        assertEquals(0x12345678, buffer.getInt());
+        assertEquals(0x123456789ABCDEF0L, buffer.getLong());
+        assertEquals(3.14f, buffer.getFloat(), 0.001f);
+        assertEquals(2.718281828, buffer.getDouble(), 0.000001);
     }
     
     @Test
@@ -70,7 +68,7 @@ class ImprintBufferTest {
         
         // Verify VarInt encoding matches our VarInt utility
         buffer.position(0);
-        var compareBuffer = ImprintBuffer.wrap(ByteBuffer.allocate(64));;
+        var compareBuffer = new ImprintBuffer(new byte[64]);
         VarInt.encode(300, compareBuffer);
         
         for (int i = 0; i < compareBuffer.position(); i++) {
@@ -98,6 +96,60 @@ class ImprintBufferTest {
         byte[] stringBytes = new byte[lengthResult.getValue()];
         buffer.get(stringBytes);
         assertEquals(testString, new String(stringBytes));
+    }
+    
+    @Test
+    void testVarIntRoundTrip() {
+        byte[] array = new byte[64];
+        ImprintBuffer buffer = new ImprintBuffer(array);
+        
+        // Test various VarInt values to ensure putVarInt/getVarInt work correctly after consolidation
+        int[] testValues = {
+            0,           // Single byte: 0
+            1,           // Single byte: 1
+            127,         // Single byte: 127 (max single byte value)
+            128,         // Two bytes: 128 (min two byte value)
+            300,         // Two bytes: 300
+            16383,       // Two bytes: 16383 (max two byte value)
+            16384,       // Three bytes: 16384 (min three byte value)
+            1048575,     // Three bytes: 1048575 (max three byte value)  
+            16777215,    // Four bytes: 16777215 (max four byte value)
+            268435455,   // Five bytes: 268435455 (max five byte value)
+            Integer.MAX_VALUE // Five bytes: max int value
+        };
+        
+        for (int testValue : testValues) {
+            // Reset buffer for each test
+            buffer.position(0);
+            
+            // Write VarInt using ImprintBuffer method (should delegate to VarInt utility)
+            buffer.putVarInt(testValue);
+            int writePosition = buffer.position();
+            
+            // Read back using ImprintBuffer method (should delegate to VarInt utility)
+            buffer.position(0);
+            int readValue = buffer.getVarInt();
+            int readPosition = buffer.position();
+            
+            // Verify round-trip correctness
+            assertEquals(testValue, readValue, "VarInt round-trip failed for value: " + testValue);
+            assertEquals(writePosition, readPosition, "Read/write positions don't match for value: " + testValue);
+            
+            // Also verify that our ImprintBuffer methods produce the same result as VarInt utility directly
+            buffer.position(0);
+            var directEncodeBuffer = new ImprintBuffer(new byte[64]);
+            try {
+                VarInt.encode(testValue, directEncodeBuffer);
+                
+                // Compare the encoded bytes
+                for (int i = 0; i < writePosition; i++) {
+                    assertEquals(directEncodeBuffer.array()[i], array[i], 
+                        "Direct VarInt encoding differs from ImprintBuffer encoding at byte " + i + " for value " + testValue);
+                }
+            } catch (Exception e) {
+                fail("VarInt utility encoding failed for value: " + testValue + ", error: " + e.getMessage());
+            }
+        }
     }
     
     @Test

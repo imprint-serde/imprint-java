@@ -589,7 +589,7 @@ class ImprintOperationsTest {
             var validBuffer = validRecord.serializeToBuffer();
 
             // Test invalid magic byte
-            var invalidMagic = ImprintBuffer.wrap(ByteBuffer.allocate(20));
+            var invalidMagic = new ImprintBuffer(new byte[20]);
             invalidMagic.putByte((byte) 0x99); // Invalid magic
             invalidMagic.putByte((byte) 0x01); // Valid version
             invalidMagic.flip();
@@ -600,7 +600,7 @@ class ImprintOperationsTest {
                 ImprintOperations.projectBytes(invalidMagic, 1));
 
             // Test buffer too small
-            var tooSmall = ImprintBuffer.wrap(ByteBuffer.allocate(5));
+            var tooSmall = new ImprintBuffer(new byte[5]);
             tooSmall.putBytes(new byte[]{1, 2, 3, 4, 5});
             tooSmall.flip();
             
@@ -610,7 +610,7 @@ class ImprintOperationsTest {
                 ImprintOperations.projectBytes(tooSmall, 1));
 
             // Test invalid version
-            var invalidVersion = ImprintBuffer.wrap(ByteBuffer.allocate(20));
+            var invalidVersion = new ImprintBuffer(new byte[20]);
             invalidVersion.putByte((byte) 0x49); // Valid magic
             invalidVersion.putByte((byte) 0x99); // Invalid version
             invalidVersion.flip();

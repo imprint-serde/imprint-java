@@ -7,12 +7,12 @@ import com.imprint.types.ImprintSerializers;
 import com.imprint.types.MapKey;
 import com.imprint.types.TypeCode;
 import com.imprint.util.ImprintBuffer;
-import com.imprint.util.VarInt;
 import lombok.SneakyThrows;
 import lombok.Value;
 
-import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * A fluent builder for creating ImprintRecord instances with type-safe, 
@@ -154,24 +154,13 @@ public final class ImprintRecordBuilder {
     public ImprintBuffer buildToBuffer() throws ImprintException {
         // 1. Calculate conservative size BEFORE sorting (which invalidates the map)
         int conservativeSize = calculateConservativePayloadSize();
-
         // 2. Sort fields by ID for directory ordering
         var sortedFieldsResult = getSortedFieldsResult();
         var sortedValues = sortedFieldsResult.getValues();
         var sortedKeys = sortedFieldsResult.getKeys();
         var fieldCount = sortedFieldsResult.getCount();
-
         // 3. Calculate directory size
         int directorySize = ImprintRecord.calculateDirectorySize(fieldCount);
-        
-        // Debug: Log directory size calculation for empty records
-        if (fieldCount == 0) {
-            System.err.println("DEBUG: Directory size calculation for empty record:");
-            System.err.println("  fieldCount=" + fieldCount);
-            System.err.println("  VarInt.encodedLength(" + fieldCount + ")=" + com.imprint.util.VarInt.encodedLength(fieldCount));
-            System.err.println("  calculated directorySize=" + directorySize);
-        }
-        
         // 4. Use growable buffer to eliminate size guessing and retry logic
         return serializeToBuffer(schemaId, sortedKeys, sortedValues, fieldCount,
             conservativeSize, directorySize);
@@ -337,56 +326,6 @@ public final class ImprintRecordBuilder {
         buffer.limit(finalSize);
         
         return buffer.asReadOnlyBuffer();
-    }
-
-    /**
-     * Legacy serialization method with retry logic - kept for compatibility.
-     * Serialize directly to a single buffer with conservative size multiplier.
-     * Writes payload first, then backfills header and directory.
-     */
-    private ByteBuffer serializeToSingleBuffer(SchemaId schemaId, short[] sortedKeys, Object[] sortedValues, int fieldCount, int conservativePayloadSize, int directorySize,
-                                               int sizeMultiplier) throws ImprintException {
-        
-        // Calculate total buffer size needed
-        int totalSize = Constants.HEADER_BYTES + directorySize + (conservativePayloadSize * sizeMultiplier);
-        byte[] bufferArray = new byte[totalSize];
-        var buffer = new ImprintBuffer(bufferArray);
-        
-        // Skip header and directory space, write payload first
-        int payloadStart = Constants.HEADER_BYTES + directorySize;
-        buffer.position(payloadStart);
-        
-        // Serialize payload and collect offsets
-        int[] offsets = new int[fieldCount];
-        for (int i = 0; i < fieldCount; i++) {
-            var fieldValue = (FieldValue) sortedValues[i];
-            offsets[i] = buffer.position() - payloadStart; // Offset relative to payload start
-            serializeFieldValue(fieldValue, buffer);
-        }
-        
-        int actualPayloadSize = buffer.position() - payloadStart;
-        
-        // Return to the front to fill in the header now that we have true payload size
-        buffer.position(0);
-        
-        // Write header
-        var header = new Header(new Flags((byte) 0), schemaId, actualPayloadSize);
-        buffer.putByte(Constants.MAGIC);
-        buffer.putByte(Constants.VERSION);
-        buffer.putByte(header.getFlags().getValue());
-        buffer.putInt(header.getSchemaId().getFieldSpaceId());
-        buffer.putInt(header.getSchemaId().getSchemaHash());
-        buffer.putInt(header.getPayloadSize());
-        
-        // Write directory
-        writeDirectoryToBuffer(sortedKeys, sortedValues, offsets, fieldCount, buffer);
-        
-        // Set final limit and flip
-        int finalSize = Constants.HEADER_BYTES + directorySize + actualPayloadSize;
-        buffer.limit(finalSize);
-        buffer.position(0);
-        
-        return buffer.toByteBuffer().asReadOnlyBuffer();
     }
 
     private void serializeFieldValue(FieldValue fieldValue, ImprintBuffer buffer) throws ImprintException {

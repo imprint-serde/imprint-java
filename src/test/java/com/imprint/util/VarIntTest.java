@@ -16,7 +16,7 @@ class VarIntTest {
         };
         
         for (int value : testCases) {
-            var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(10));
+            var buffer = new ImprintBuffer(new byte[10]);
             VarInt.encode(value, buffer);
             int encodedLength = buffer.position();
             
@@ -40,7 +40,7 @@ class VarIntTest {
     }
     
     private void assertEncodedBytes(int value, int... expectedBytes) {
-        var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(10));
+        var buffer = new ImprintBuffer(new byte[10]);
         VarInt.encode(value, buffer);
         buffer.flip();
         
@@ -57,7 +57,7 @@ class VarIntTest {
     
     @Test
     void shouldWorkWithByteBuffer() throws ImprintException {
-        var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(10));
+        var buffer = new ImprintBuffer(new byte[10]);
         VarInt.encode(16384, buffer);
         
         buffer.flip();
@@ -79,7 +79,7 @@ class VarIntTest {
     
     @Test
     void shouldHandleBufferUnderflow() {
-        var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(1));
+        var buffer = new ImprintBuffer(new byte[1]);
         buffer.putByte((byte) 0x80); // incomplete varint
         buffer.flip();
         
@@ -91,7 +91,7 @@ class VarIntTest {
     
     @Test
     void shouldHandleOverlongEncoding() {
-        var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(10));
+        var buffer = new ImprintBuffer(new byte[10]);
         buffer.putBytes(new byte[]{(byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, 0x01});
         buffer.flip();
         
@@ -103,7 +103,7 @@ class VarIntTest {
     
     @Test
     void shouldHandleOverflow() {
-        var buffer = ImprintBuffer.wrap(ByteBuffer.allocate(10));
+        var buffer = new ImprintBuffer(new byte[10]);
         buffer.putBytes(new byte[]{(byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, 0x10});
         buffer.flip();
         

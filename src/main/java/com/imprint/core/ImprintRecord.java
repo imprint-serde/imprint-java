@@ -14,17 +14,8 @@ import lombok.Getter;
 import lombok.ToString;
 import lombok.experimental.NonFinal;
 
-import java.nio.ByteBuffer;
 import java.util.*;
 
-/**
- * Imprint Record
- * <p>
- * This is the primary way to work with Imprint records, providing:
- * - Zero-copy field access via binary search
- * - Direct bytes-to-bytes operations (merge, project)
- * - Lazy deserializing operations
- */
 @lombok.Value
 @EqualsAndHashCode(of = "serializedBytes")
 @ToString(of = {"header"})
@@ -47,34 +38,13 @@ public class ImprintRecord {
     //Directory View cache to allow for easier mutable operations needed for lazy initialization
     Directory.DirectoryView directoryView;
 
-    /**
-     * Package-private constructor for @Value that creates immutable ByteBuffer views.
-     */
     ImprintRecord(ImprintBuffer serializedBytes, Header header, ImprintBuffer directoryBuffer, ImprintBuffer payload) {
-        // Debug: Log buffer details for empty records during construction
-        if (serializedBytes.remaining() <= 16) {  // Log for small buffers
-            System.err.println("DEBUG: ImprintRecord constructor - buffer details:");
-            System.err.println("  input serializedBytes.remaining()=" + serializedBytes.remaining());
-            System.err.println("  input serializedBytes.position()=" + serializedBytes.position());
-            System.err.println("  input serializedBytes.limit()=" + serializedBytes.limit());
-        }
-        
         this.serializedBytes = serializedBytes.asReadOnlyBuffer();
-        
-        // Debug: Log buffer details after asReadOnlyBuffer()
-        if (this.serializedBytes.remaining() <= 16) {  // Log for small buffers
-            System.err.println("  after asReadOnlyBuffer().remaining()=" + this.serializedBytes.remaining());
-            System.err.println("  after asReadOnlyBuffer().position()=" + this.serializedBytes.position());
-            System.err.println("  after asReadOnlyBuffer().limit()=" + this.serializedBytes.limit());
-        }
-        
         this.header = Objects.requireNonNull(header);
         this.directoryBuffer = directoryBuffer.asReadOnlyBuffer();
         this.payload = payload.asReadOnlyBuffer();
         this.directoryView = null;
     }
-
-    // ========== STATIC FACTORY METHODS ==========
 
     /**
      * Create a builder for constructing new ImprintRecord instances.
@@ -112,23 +82,11 @@ public class ImprintRecord {
      */
     public static ImprintRecord fromBytes(ImprintBuffer serializedBytes) throws ImprintException {
         Objects.requireNonNull(serializedBytes, "Serialized bytes cannot be null");
-
-        // Debug: Log buffer details for empty records in fromBytes
-        if (serializedBytes.remaining() <= 16) {  // Log for small buffers
-            System.err.println("DEBUG: ImprintRecord.fromBytes() - input buffer details:");
-            System.err.println("  input serializedBytes.remaining()=" + serializedBytes.remaining());
-            System.err.println("  input serializedBytes.position()=" + serializedBytes.position());
-            System.err.println("  input serializedBytes.limit()=" + serializedBytes.limit());
-        }
-
         var buffer = serializedBytes.duplicate();
-
         // Parse header
         var header = parseHeader(buffer);
-
         // Extract directory and payload sections
         var parsedBuffers = parseBuffersFromSerialized(serializedBytes);
-
         return new ImprintRecord(serializedBytes, header, parsedBuffers.directoryBuffer, parsedBuffers.payload);
     }
 
@@ -175,9 +133,8 @@ public class ImprintRecord {
      * Get a DirectoryView for straight through directory access.
      */
     public Directory.DirectoryView getDirectoryView() {
-        if (directoryView == null) {
+        if (directoryView == null)
             directoryView = new ImprintDirectoryView();
-        }
         return directoryView;
     }
 
@@ -234,8 +191,6 @@ public class ImprintRecord {
         return getDirectoryCount();
     }
 
-    // ========== TYPED GETTERS ==========
-
     public String getString(int fieldId) throws ImprintException {
         return (String) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.STRING, "STRING");
     }
@@ -282,39 +237,8 @@ public class ImprintRecord {
      * Returns a copy of the bytes.
      */
     public ImprintBuffer serializeToBuffer() {
-        // Debug: Log original buffer state
-        if (serializedBytes.remaining() <= 20) {  // Log for small buffers
-            System.err.println("DEBUG: serializeToBuffer() - original serializedBytes:");
-            System.err.println("  serializedBytes.remaining()=" + serializedBytes.remaining());
-            System.err.println("  serializedBytes.position()=" + serializedBytes.position());
-            System.err.println("  serializedBytes.limit()=" + serializedBytes.limit());
-        }
-        
         var buffer = serializedBytes.duplicate();
-        
-        // Debug: Log after duplicate
-        if (buffer.remaining() <= 20) {  // Log for small buffers
-            System.err.println("  after duplicate().remaining()=" + buffer.remaining());
-            System.err.println("  after duplicate().position()=" + buffer.position());
-            System.err.println("  after duplicate().limit()=" + buffer.limit());
-        }
-        
         buffer.position(0);
-        
-        // Debug: Log after position(0)
-        if (buffer.remaining() <= 20) {  // Log for small buffers
-            System.err.println("  after position(0).remaining()=" + buffer.remaining());
-            System.err.println("  after position(0).position()=" + buffer.position());
-            System.err.println("  after position(0).limit()=" + buffer.limit());
-        }
-        
-        // Debug: Log buffer size for empty records  
-        if (buffer.remaining() < Constants.HEADER_BYTES) {
-            System.err.println("WARNING: serializeToBuffer() returning undersized buffer: " + 
-                              buffer.remaining() + " bytes (minimum " + Constants.HEADER_BYTES + " required)");
-            System.err.println("Buffer details: position=" + buffer.position() + ", limit=" + buffer.limit() + ", capacity=" + buffer.capacity());
-        }
-        
         return buffer;
     }
 

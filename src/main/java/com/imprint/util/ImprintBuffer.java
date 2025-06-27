@@ -1,27 +1,16 @@
 package com.imprint.util;
 
+import com.imprint.error.ImprintException;
 import lombok.Getter;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 
-/**
- * High-performance buffer optimized specifically for Imprint serialization.
- * Eliminates ByteBuffer overhead by using direct memory access via Unsafe.
- * <p>
- * Key optimizations:
- * - No bounds checking (disabled via system property)
- * - Direct memory writes without position tracking
- * - Little-endian optimized for x86
- * - Minimal API surface for serialization use case
- */
 @SuppressWarnings({"UnusedReturnValue", "unused"})
 public final class ImprintBuffer {
     
-    // Bounds checking control - can be disabled for production
+    // Bounds checking control
     private static final boolean BOUNDS_CHECK = Boolean.parseBoolean(
         System.getProperty("imprint.buffer.bounds.check", "false"));
     
@@ -98,37 +87,9 @@ public final class ImprintBuffer {
         this.growable = growable;
     }
     
-    /**
-     * Create buffer from ByteBuffer (for compatibility).
-     */
-    public static ImprintBuffer wrap(ByteBuffer byteBuffer) {
-        if (byteBuffer.isDirect()) {
-            throw new IllegalArgumentException("Direct ByteBuffers not yet supported");
-        }
-        
-        byte[] array = byteBuffer.array();
-        int offset = byteBuffer.arrayOffset() + byteBuffer.position();
-        int length = byteBuffer.remaining();
-        
-        ImprintBuffer buffer = new ImprintBuffer(array, offset, length);
-        // Preserve the ByteBuffer's position and limit state
-        buffer.position = 0;
-        buffer.limit = length;
-        return buffer;
-    }
-    
-    /**
-     * Create read-only buffer from ByteBuffer data (copying the data).
-     */
-    public static ImprintBuffer fromByteBuffer(ByteBuffer byteBuffer) {
-        byte[] data = new byte[byteBuffer.remaining()];
-        byteBuffer.duplicate().get(data);
-        return new ImprintBuffer(data);
-    }
     
     /**
      * Create growable buffer with initial capacity.
-     * Uses Agrona-style growth strategy for maximum performance.
      */
     public static ImprintBuffer growable(int initialCapacity) {
         return new ImprintBuffer(new byte[initialCapacity], true);
@@ -200,15 +161,14 @@ public final class ImprintBuffer {
         int requiredCapacity = position + additionalBytes;
         if (requiredCapacity <= capacity) return;
         
-        // Agrona-style growth: 1.5x with 64-byte alignment for cache efficiency
+        // Buffer growth strategy: 1.5x with 64-byte alignment - should help with cache efficiency
         int newCapacity = Math.max(requiredCapacity, (capacity * 3) / 2);
         newCapacity = (newCapacity + 63) & ~63; // Align to 64-byte boundary
         
         // Allocate new array and copy existing data
         byte[] newArray = new byte[newCapacity];
         int currentOffset = (int) (baseOffset - ARRAY_BYTE_BASE_OFFSET);
-        
-        // Use UNSAFE for ultra-fast bulk copy
+
         UNSAFE.copyMemory(array, baseOffset, newArray, ARRAY_BYTE_BASE_OFFSET + currentOffset, position);
         
         // Update buffer state
@@ -247,13 +207,11 @@ public final class ImprintBuffer {
     }
     
     /**
-     * Create read-only view (returns this since ImprintBuffer is write-focused).
+     * Create read-only view (returns this since ImprintBuffer is write-focused anyways).
      */
     public ImprintBuffer asReadOnlyBuffer() {
         return duplicate();
     }
-    
-    // ========== PRIMITIVE WRITES (Little-Endian Optimized) ==========
     
     /**
      * Write single byte.
@@ -287,14 +245,13 @@ public final class ImprintBuffer {
             throw new RuntimeException("Buffer overflow");
         }
         
-        // Write directly - Unsafe uses native byte order, which is little-endian on x86
+        // Write directly - Unsafe already uses native byte order, which is little-endian on x86
         UNSAFE.putShort(array, baseOffset + position, value);
         position += 2;
         return this;
     }
 
     public ImprintBuffer putUnsafeShort(short value) {
-        // Write directly - Unsafe uses native byte order, which is little-endian on x86
         UNSAFE.putShort(array, baseOffset + position, value);
         position += 2;
         return this;
@@ -308,8 +265,6 @@ public final class ImprintBuffer {
         if (BOUNDS_CHECK && !growable && position + 4 > limit) {
             throw new RuntimeException("Buffer overflow");
         }
-        
-        // Write directly - Unsafe uses native byte order, which is little-endian on x86
         UNSAFE.putInt(array, baseOffset + position, value);
         position += 4;
         return this;
@@ -319,7 +274,6 @@ public final class ImprintBuffer {
      * Write int32 in little-endian format.
      */
     public ImprintBuffer putUnsafeInt(int value) {
-        // Write directly - Unsafe uses native byte order, which is little-endian on x86
         UNSAFE.putInt(array, baseOffset + position, value);
         position += 4;
         return this;
@@ -329,7 +283,6 @@ public final class ImprintBuffer {
      * Write int64 in little-endian format.
      */
     public ImprintBuffer putUnsafeLong(long value) {
-        // Write directly - Unsafe uses native byte order, which is little-endian on x86
         UNSAFE.putLong(array, baseOffset + position, value);
         position += 8;
         return this;
@@ -344,7 +297,6 @@ public final class ImprintBuffer {
             throw new RuntimeException("Buffer overflow");
         }
         
-        // Write directly - Unsafe uses native byte order, which is little-endian on x86
         UNSAFE.putLong(array, baseOffset + position, value);
         position += 8;
         return this;
@@ -391,8 +343,6 @@ public final class ImprintBuffer {
         position += length;
         return this;
     }
-    
-    // ========== PRIMITIVE READS (Little-Endian Optimized) ==========
     
     /**
      * Read single byte.
@@ -498,117 +448,26 @@ public final class ImprintBuffer {
         position += length;
         return this;
     }
-    
-    // ========== OPTIMIZED VARINT WRITES ==========
+
     
     /**
-     * Write VarInt directly to buffer (optimized).
+     * Write VarInt using the centralized VarInt utility class.
      */
     public ImprintBuffer putVarInt(int value) {
-        // Estimate max bytes needed (5 for int32 VarInt)
-        ensureCapacity(5);
-        
-        // Fast path for small values (most common case)
-        if ((value & 0xFFFFFF80) == 0) {
-            return putByte((byte) value);
-        }
-        
-        // Unrolled loop for better performance
-        while ((value & 0xFFFFFF80) != 0) {
-            putByte((byte) ((value & 0x7F) | 0x80));
-            value >>>= 7;
-        }
-        return putByte((byte) value);
+        VarInt.encode(value, this);
+        return this;
     }
     
     /**
-     * Write VarLong directly to buffer (optimized).
-     */
-    public ImprintBuffer putVarLong(long value) {
-        // Estimate max bytes needed (10 for int64 VarLong)
-        ensureCapacity(10);
-        
-        // Fast path for small values (most common case)
-        if ((value & 0xFFFFFFFFFFFFFF80L) == 0) {
-            return putByte((byte) value);
-        }
-        
-        // Unrolled loop for better performance
-        while ((value & 0xFFFFFFFFFFFFFF80L) != 0) {
-            putByte((byte) ((value & 0x7F) | 0x80));
-            value >>>= 7;
-        }
-        return putByte((byte) value);
-    }
-    
-    /**
-     * Encode a VarInt into this buffer (compatible with VarInt.encode).
-     */
-    public void encodeVarInt(int value) {
-        putVarInt(value);
-    }
-    
-    /**
-     * Read VarInt from buffer (optimized).
+     * Read VarInt using the centralized VarInt utility class.
      */
     public int getVarInt() {
-        int result = 0;
-        int shift = 0;
-        
-        while (true) {
-            if (BOUNDS_CHECK && position >= limit) {
-                throw new RuntimeException("Buffer underflow reading VarInt");
-            }
-            
-            byte b = UNSAFE.getByte(array, baseOffset + position);
-            position++;
-            
-            result |= (b & 0x7F) << shift;
-            
-            if ((b & 0x80) == 0) {
-                break;
-            }
-            
-            shift += 7;
-            if (shift >= 32) {
-                throw new RuntimeException("VarInt too long");
-            }
+        try {
+            return VarInt.decode(this).getValue();
+        } catch (ImprintException e) {
+            throw new RuntimeException("Failed to decode VarInt", e);
         }
-        
-        return result;
     }
-    
-    /**
-     * Read VarLong from buffer (optimized).
-     */
-    public long getVarLong() {
-        long result = 0;
-        int shift = 0;
-        
-        while (true) {
-            if (BOUNDS_CHECK && position >= limit) {
-                throw new RuntimeException("Buffer underflow reading VarLong");
-            }
-            
-            byte b = UNSAFE.getByte(array, baseOffset + position);
-            position++;
-            
-            result |= (long)(b & 0x7F) << shift;
-            
-            if ((b & 0x80) == 0) {
-                break;
-            }
-            
-            shift += 7;
-            if (shift >= 64) {
-                throw new RuntimeException("VarLong too long");
-            }
-        }
-        
-        return result;
-    }
-    
-    // ========== STRING WRITES (UTF-8) ==========
     
     /**
      * Write UTF-8 string with length prefix.
@@ -633,22 +492,6 @@ public final class ImprintBuffer {
     // ========== UTILITY METHODS ==========
     
     /**
-     * Convert to ByteBuffer for compatibility.
-     */
-    public ByteBuffer toByteBuffer() {
-        int arrayOffset = (int) (baseOffset - ARRAY_BYTE_BASE_OFFSET);
-        
-        // For growable buffers, use the actual array length to avoid capacity issues
-        int bufferCapacity = growable ? (array.length - arrayOffset) : capacity;
-        
-        ByteBuffer buffer = ByteBuffer.wrap(array, arrayOffset, bufferCapacity);
-        buffer.order(ByteOrder.LITTLE_ENDIAN);
-        buffer.position(position);
-        buffer.limit(Math.min(limit, bufferCapacity)); // Ensure limit doesn't exceed capacity
-        return buffer;
-    }
-    
-    /**
      * Get backing array (for zero-copy operations).
      */
     public byte[] array() {
@@ -661,10 +504,7 @@ public final class ImprintBuffer {
     public int arrayOffset() {
         return (int) (baseOffset - ARRAY_BYTE_BASE_OFFSET);
     }
-    
-    /**
-     * Ultra-fast memory move within the same buffer using UNSAFE operations.
-     */
+
     public void moveMemory(int srcPos, int dstPos, int length) {
         if (length <= 0 || srcPos == dstPos) return;
         

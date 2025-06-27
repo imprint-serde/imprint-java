@@ -1,11 +1,9 @@
 package com.imprint.util;
 
-import com.imprint.error.ImprintException;
 import com.imprint.error.ErrorType;
-import lombok.*;
+import com.imprint.error.ImprintException;
+import lombok.Value;
 import lombok.experimental.UtilityClass;
-
-import java.nio.ByteBuffer;
 
 /**
  * Utility class for encoding and decoding variable-length integers (VarInt).
@@ -23,7 +21,6 @@ public final class VarInt {
     private static final int[] ENCODED_LENGTHS = new int[CACHE_SIZE];
 
     static {
-        // Pre-compute encoded lengths for cached values
         for (int i = 0; i < CACHE_SIZE; i++) {
             long val = Integer.toUnsignedLong(i);
             int length = 1;
@@ -41,9 +38,7 @@ public final class VarInt {
      * @param buffer the buffer to write to
      */
     public static void encode(int value, ImprintBuffer buffer) {
-        // Convert to unsigned long for proper bit manipulation
         long val = Integer.toUnsignedLong(value);
-        // Encode at least one byte, then continue while value has more bits
         do {
             byte b = (byte) (val & SEGMENT_BITS);
             val >>>= 7;
