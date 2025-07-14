@@ -7,6 +7,7 @@ import lombok.Getter;
 /**
  * Type codes for Imprint values.
  */
+@Getter
 public enum TypeCode {
     NULL(0x0),
     BOOL(0x1),
@@ -18,12 +19,16 @@ public enum TypeCode {
     STRING(0x7),
     ARRAY(0x8),
     MAP(0x9),
-    ROW(0xA);   // TODO: implement (basically a placeholder for user-defined type)
+    ROW(0xA),
+    DATE(0xB),
+    TIME(0xC),
+    TIMESTAMP(0xD),
+    UUID(0xE),
+    DECIMAL(0xF);
 
-    @Getter
     private final byte code;
 
-    private static final TypeCode[] LOOKUP = new TypeCode[11];
+    private static final TypeCode[] LOOKUP = new TypeCode[16];
 
     static {
         for (var type : values()) {
