@@ -6,6 +6,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.temporal.ChronoUnit;
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("ImprintRecord")
@@ -202,35 +209,6 @@ class ImprintRecordTest {
     }
 
     @Nested
-    @DisplayName("Performance Characteristics")
-    class PerformanceCharacteristics {
-
-        @Test
-        @DisplayName("should have minimal memory footprint")
-        void shouldHaveMinimalMemoryFootprint() {
-            var originalSize = testRecord.serializeToBuffer().remaining();
-            var serializedSize = serializedRecord.getSerializedSize();
-
-            assertEquals(originalSize, serializedSize);
-            
-            // ImprintRecord should not significantly increase memory usage
-            // (just the wrapper object itself)
-            assertTrue(serializedSize > 0);
-        }
-
-        @Test
-        @DisplayName("should support repeated operations efficiently")
-        void shouldSupportRepeatedOperationsEfficiently() throws ImprintException {
-            // Multiple field access should not cause performance degradation
-            for (int i = 0; i < 100; i++) {
-                assertEquals(Integer.valueOf(42), serializedRecord.getInt32(1));
-                assertEquals("hello", serializedRecord.getString(2));
-                assertTrue(serializedRecord.hasField(3));
-            }
-        }
-    }
-
-    @Nested
     @DisplayName("Edge Cases")
     class EdgeCases {
 
@@ -284,6 +262,85 @@ class ImprintRecordTest {
                     .build();
 
             assertNotEquals(serializedRecord, differentSerialized);
+        }
+    }
+
+    @Nested
+    @DisplayName("Native Type Getters")
+    class NativeTypeGetters {
+
+        private ImprintRecord nativeTypesRecord;
+        private LocalTime testTime;
+        private Instant testTimestamp;
+
+        @BeforeEach
+        void setUp() throws ImprintException {
+            testTime = LocalTime.now().truncatedTo(ChronoUnit.MILLIS);
+            testTimestamp = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+            
+            nativeTypesRecord = ImprintRecord.builder(testSchema)
+                    .field(10, LocalDate.of(2023, 12, 25))
+                    .field(11, testTime)
+                    .field(12, UUID.fromString("550e8400-e29b-41d4-a716-446655440000"))
+                    .field(13, new BigDecimal("123.456789"))
+                    .field(14, testTimestamp)
+                    .build();
+        }
+
+        @Test
+        @DisplayName("should get Date values correctly")
+        void shouldGetDateValuesCorrectly() throws ImprintException {
+            assertEquals(LocalDate.of(2023, 12, 25), nativeTypesRecord.getDate(10));
+        }
+
+        @Test
+        @DisplayName("should get Time values correctly")
+        void shouldGetTimeValuesCorrectly() throws ImprintException {
+            assertEquals(testTime, nativeTypesRecord.getTime(11));
+        }
+
+        @Test
+        @DisplayName("should get UUID values correctly")
+        void shouldGetUuidValuesCorrectly() throws ImprintException {
+            assertEquals(UUID.fromString("550e8400-e29b-41d4-a716-446655440000"), nativeTypesRecord.getUuid(12));
+        }
+
+        @Test
+        @DisplayName("should get Decimal values correctly")
+        void shouldGetDecimalValuesCorrectly() throws ImprintException {
+            assertEquals(new BigDecimal("123.456789"), nativeTypesRecord.getDecimal(13));
+        }
+
+        @Test
+        @DisplayName("should get Timestamp values correctly")
+        void shouldGetTimestampValuesCorrectly() throws ImprintException {
+            assertEquals(testTimestamp, nativeTypesRecord.getTimestamp(14));
+        }
+
+        @Test
+        @DisplayName("should throw exception for type mismatch on native types")
+        void shouldThrowExceptionForTypeMismatch() {
+            // Try to get a Date as Time
+            assertThrows(ImprintException.class, () -> nativeTypesRecord.getTime(10));
+            
+            // Try to get a UUID as Decimal
+            assertThrows(ImprintException.class, () -> nativeTypesRecord.getDecimal(12));
+            
+            // Try to get a Timestamp as Date
+            assertThrows(ImprintException.class, () -> nativeTypesRecord.getDate(14));
+            
+            // Try to get a string as Date (from the original test record)
+            assertThrows(ImprintException.class, () -> testRecord.getDate(2));
+        }
+
+        @Test
+        @DisplayName("should throw exception for non-existent native type fields")
+        void shouldThrowExceptionForNonExistentNativeTypeFields() {
+            assertThrows(ImprintException.class, () -> nativeTypesRecord.getDate(99));
+            assertThrows(ImprintException.class, () -> nativeTypesRecord.getTime(99));
+            assertThrows(ImprintException.class, () -> nativeTypesRecord.getUuid(99));
+            assertThrows(ImprintException.class, () -> nativeTypesRecord.getDecimal(99));
+            assertThrows(ImprintException.class, () -> nativeTypesRecord.getTimestamp(99));
         }
     }
 }

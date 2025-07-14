@@ -14,7 +14,12 @@ import lombok.Getter;
 import lombok.ToString;
 import lombok.experimental.NonFinal;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.*;
+import java.util.UUID;
 
 @lombok.Value
 @EqualsAndHashCode(of = "serializedBytes")
@@ -231,6 +236,26 @@ public class ImprintRecord {
 
     public ImprintRecord getRow(int fieldId) throws ImprintException {
         return (ImprintRecord) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.ROW, "ROW");
+    }
+
+    public LocalDate getDate(int fieldId) throws ImprintException {
+        return (LocalDate) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.DATE, "DATE");
+    }
+
+    public LocalTime getTime(int fieldId) throws ImprintException {
+        return (LocalTime) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.TIME, "TIME");
+    }
+
+    public UUID getUuid(int fieldId) throws ImprintException {
+        return (UUID) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.UUID, "UUID");
+    }
+
+    public BigDecimal getDecimal(int fieldId) throws ImprintException {
+        return (BigDecimal) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.DECIMAL, "DECIMAL");
+    }
+
+    public Instant getTimestamp(int fieldId) throws ImprintException {
+        return (Instant) getTypedPrimitive(fieldId, com.imprint.types.TypeCode.TIMESTAMP, "TIMESTAMP");
     }
 
     /**
@@ -590,6 +615,11 @@ public class ImprintRecord {
             case FLOAT64:
             case BYTES:
             case STRING:
+            case DATE:
+            case TIME:
+            case UUID:
+            case DECIMAL:
+            case TIMESTAMP:
                 return ImprintDeserializers.deserializePrimitive(valueBuffer, typeCode);
             case ARRAY:
                 return deserializePrimitiveArray(valueBuffer);
