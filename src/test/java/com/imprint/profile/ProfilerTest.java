@@ -22,10 +22,10 @@ public class ProfilerTest {
         System.out.println("Starting merge profiler test - attach profiler now...");
         Thread.sleep(3000);
 
-        profileSmallMerges();
+        //profileSmallMerges();
         profileLargeMerges();
-        profileOverlappingMerges();
-        profileDisjointMerges();
+        //profileOverlappingMerges();
+        //profileDisjointMerges();
     }
 
     /**
@@ -66,7 +66,7 @@ public class ProfilerTest {
 
         var record1 = createTestRecord(100);
         var record2 = createTestRecord(100);
-        int iterations = 100_000;
+        int iterations = 1000000;
 
         System.out.printf("Beginning large merge profiling (%,d iterations)...%n", iterations);
         long start = System.nanoTime();
@@ -261,7 +261,7 @@ public class ProfilerTest {
         long start = System.nanoTime();
 
         for (int i = 0; i < iterations; i++) {
-            var builder = ImprintRecord.builder(schemaId);
+            var builder = ImprintRecord.builder(schemaId, 512);
 
             // Add various field types based on recordSize
             for (int fieldId = 1; fieldId <= recordSize; fieldId++) {

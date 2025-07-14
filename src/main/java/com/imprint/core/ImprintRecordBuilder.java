@@ -6,13 +6,13 @@ import com.imprint.error.ImprintException;
 import com.imprint.types.ImprintSerializers;
 import com.imprint.types.MapKey;
 import com.imprint.types.TypeCode;
-import com.imprint.util.VarInt;
+import com.imprint.util.ImprintBuffer;
 import lombok.SneakyThrows;
+import lombok.Value;
 
-import java.nio.BufferOverflowException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * A fluent builder for creating ImprintRecord instances with type-safe, 
@@ -41,13 +41,13 @@ public final class ImprintRecordBuilder {
     private final ImprintFieldObjectMap<FieldValue> fields;
     private int estimatedPayloadSize = 0;
 
-    // Direct primitive storage to avoid Value object creation
-    @lombok.Value
+
+    @Value
     static class FieldValue {
         byte typeCode;
         Object value;
         
-        // Fast factory methods for primitives
+        // Factory methods for primitives
         static FieldValue ofInt32(int value) { return new FieldValue(TypeCode.INT32.getCode(), value); }
         static FieldValue ofInt64(long value) { return new FieldValue(TypeCode.INT64.getCode(), value); }
         static FieldValue ofFloat32(float value) { return new FieldValue(TypeCode.FLOAT32.getCode(), value); }
@@ -98,7 +98,7 @@ public final class ImprintRecordBuilder {
         return addField(id, FieldValue.ofBytes(value));
     }
 
-    // Collections - store as raw collections, convert during serialization
+    // Collections - store as raw collections for now, convert during serialization
     public ImprintRecordBuilder field(int id, List<?> values) {
         return addField(id, FieldValue.ofArray(values));
     }
@@ -137,65 +137,33 @@ public final class ImprintRecordBuilder {
         return this;
     }
 
-    // Builder utilities
-    public boolean hasField(int id) {
-        return fields.containsKey(id);
-    }
-
-    public int fieldCount() {
-        return fields.size();
-    }
-
-    public Set<Integer> fieldIds() {
-        var ids = new HashSet<Integer>(fields.size());
-        var keys = fields.getKeys();
-        for (var key : keys) {
-            ids.add(key);
-        }
-        return ids;
-    }
 
     // Build the final record
     public ImprintRecord build() throws ImprintException {
         // Build to bytes and then create ImprintRecord from bytes for consistency
-        var serializedBytes = buildToBuffer();
-        return ImprintRecord.fromBytes(serializedBytes);
+        var buffer = buildToBuffer();
+        return ImprintRecord.fromBytes(buffer);
     }
 
     /**
-     * Builds the record and serializes it directly to a ByteBuffer.
+     * Builds the record and serializes it directly to a ByteBuffer using growable buffer optimization.
      *
      * @return A read-only ByteBuffer containing the fully serialized record.
      * @throws ImprintException if serialization fails.
      */
-    public ByteBuffer buildToBuffer() throws ImprintException {
+    public ImprintBuffer buildToBuffer() throws ImprintException {
         // 1. Calculate conservative size BEFORE sorting (which invalidates the map)
         int conservativeSize = calculateConservativePayloadSize();
-
-        // 2. Sort fields by ID for directory ordering (zero allocation)
+        // 2. Sort fields by ID for directory ordering
         var sortedFieldsResult = getSortedFieldsResult();
-        var sortedValues = sortedFieldsResult.values;
-        var sortedKeys = sortedFieldsResult.keys;
-        var fieldCount = sortedFieldsResult.count;
-
-        // 3. Serialize payload and calculate offsets with overflow handling
-        PayloadSerializationResult result = null;
-        int bufferSizeMultiplier = 1;
-
-        while (result == null && bufferSizeMultiplier <= 64) {
-            try {
-                result = serializePayload(sortedValues, fieldCount, conservativeSize, bufferSizeMultiplier);
-            } catch (BufferOverflowException e) {
-                bufferSizeMultiplier *= 2; // Try 2x, 4x, 8x, 16x, 32x, 64x
-            }
-        }
-
-        if (result == null) {
-            throw new ImprintException(ErrorType.SERIALIZATION_ERROR,
-                    "Failed to serialize payload even with 64x buffer size");
-        }
-
-        return serializeToBuffer(schemaId, sortedKeys, sortedValues, result.offsets, fieldCount, result.payload);
+        var sortedValues = sortedFieldsResult.getValues();
+        var sortedKeys = sortedFieldsResult.getKeys();
+        var fieldCount = sortedFieldsResult.getCount();
+        // 3. Calculate directory size
+        int directorySize = ImprintRecord.calculateDirectorySize(fieldCount);
+        // 4. Use growable buffer to eliminate size guessing and retry logic
+        return serializeToBuffer(schemaId, sortedKeys, sortedValues, fieldCount,
+            conservativeSize, directorySize);
     }
 
     /**
@@ -211,7 +179,6 @@ public final class ImprintRecordBuilder {
         Objects.requireNonNull(fieldValue, "FieldValue cannot be null");
         int newSize = estimateFieldSize(fieldValue);
         var oldEntry = fields.putAndReturnOld(id, fieldValue);
-
         if (oldEntry != null) {
             int oldSize = estimateFieldSize(oldEntry);
             estimatedPayloadSize += newSize - oldSize;
@@ -226,6 +193,7 @@ public final class ImprintRecordBuilder {
         if (obj == null) {
             return FieldValue.ofNull();
         }
+
         if (obj instanceof Boolean) {
             return FieldValue.ofBool((Boolean) obj);
         }
@@ -277,50 +245,80 @@ public final class ImprintRecordBuilder {
         throw new IllegalArgumentException("Unsupported map key type: " + obj.getClass().getName());
     }
 
+    /**
+     * Fast field size estimation using heuristics for performance.
+     */
+    @SneakyThrows
     private int estimateFieldSize(FieldValue fieldValue) {
-        TypeCode typeCode;
-        try {
-            typeCode = TypeCode.fromByte(fieldValue.typeCode);
-        } catch (ImprintException e) {
-            throw new RuntimeException("Invalid type code in FieldValue: " + fieldValue.typeCode, e);
-        }
+        var typeCode = TypeCode.fromByte(fieldValue.typeCode);
         return ImprintSerializers.estimateSize(typeCode, fieldValue.value);
     }
 
+    /**
+     * Get current estimated payload size with 25% buffer.
+     */
     private int calculateConservativePayloadSize() {
         // Add 25% buffer for safety margin
         return Math.max(estimatedPayloadSize + (estimatedPayloadSize / 4), 4096);
     }
 
-    private static class PayloadSerializationResult {
-        final int[] offsets;
-        final ByteBuffer payload;
 
-        PayloadSerializationResult(int[] offsets, ByteBuffer payload) {
-            this.offsets = offsets;
-            this.payload = payload;
-        }
-    }
 
-    private PayloadSerializationResult serializePayload(Object[] sortedFields, int fieldCount, int conservativeSize, int sizeMultiplier) throws ImprintException {
-        var payloadBuffer = ByteBuffer.allocate(conservativeSize * sizeMultiplier);
-        payloadBuffer.order(ByteOrder.LITTLE_ENDIAN);
-        return doSerializePayload(sortedFields, fieldCount, payloadBuffer);
-    }
-
-    private PayloadSerializationResult doSerializePayload(Object[] sortedFields, int fieldCount, ByteBuffer payloadBuffer) throws ImprintException {
+    /**
+     * Serialize using growable buffer - eliminates size guessing and retry logic.
+     * Uses growable buffer that automatically expands as needed during serialization.
+     * //TODO: we have multiple places where we write header/directory and we should probably consolidate that
+     */
+    private ImprintBuffer serializeToBuffer(SchemaId schemaId, short[] sortedKeys, Object[] sortedValues,
+                                         int fieldCount, int conservativePayloadSize, int directorySize) throws ImprintException {
+        
+        // Start with conservative estimate, use fixed size buffer first
+        int initialSize = Constants.HEADER_BYTES + directorySize + conservativePayloadSize;
+        var buffer = new ImprintBuffer(new byte[initialSize * 2]); // Extra capacity to avoid growth
+        
+        // Reserve space for header and directory - write payload first
+        int headerAndDirSize = Constants.HEADER_BYTES + directorySize;
+        buffer.position(headerAndDirSize);
+        
+        // Serialize payload and collect offsets - buffer will grow automatically
         int[] offsets = new int[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
-            var fieldValue = (FieldValue) sortedFields[i];
-            offsets[i] = payloadBuffer.position();
-            serializeFieldValue(fieldValue, payloadBuffer);
+            var fieldValue = (FieldValue) sortedValues[i];
+            offsets[i] = buffer.position() - headerAndDirSize; // Offset relative to payload start
+            serializeFieldValue(fieldValue, buffer);
         }
-        payloadBuffer.flip();
-        var payloadView = payloadBuffer.slice().asReadOnlyBuffer();
-        return new PayloadSerializationResult(offsets, payloadView);
+        
+        int actualPayloadSize = buffer.position() - headerAndDirSize;
+        
+        // Now write header and directory at the beginning
+        buffer.position(0);
+        
+        // Write header with actual payload size
+        buffer.putByte(Constants.MAGIC);
+        buffer.putByte(Constants.VERSION);
+        buffer.putByte((byte) 0); // flags
+        buffer.putInt(schemaId.getFieldSpaceId());
+        buffer.putInt(schemaId.getSchemaHash());
+        buffer.putInt(actualPayloadSize);
+        
+        // Write directory
+        writeDirectoryToBuffer(sortedKeys, sortedValues, offsets, fieldCount, buffer);
+        
+        // Set final limit and prepare for reading
+        int finalSize = Constants.HEADER_BYTES + directorySize + actualPayloadSize;
+        
+        // Ensure minimum buffer size for validation (at least header size)
+        if (finalSize < Constants.HEADER_BYTES) {
+            throw new IllegalStateException("Buffer size (" + finalSize + ") is smaller than minimum header size (" + Constants.HEADER_BYTES + ")");
+        }
+        
+        buffer.position(0);
+        buffer.limit(finalSize);
+        
+        return buffer.asReadOnlyBuffer();
     }
 
-    private void serializeFieldValue(FieldValue fieldValue, ByteBuffer buffer) throws ImprintException {
+    private void serializeFieldValue(FieldValue fieldValue, ImprintBuffer buffer) throws ImprintException {
         var typeCode = TypeCode.fromByte(fieldValue.typeCode);
         var value = fieldValue.value;
         switch (typeCode) {
@@ -355,30 +353,34 @@ public final class ImprintRecordBuilder {
                 serializeMap((Map<?, ?>) value, buffer);
                 break;
             case ROW:
-                // Nested records
+                // Nested record serialization
                 var nestedRecord = (ImprintRecord) value;
                 var serializedRow = nestedRecord.serializeToBuffer();
-                buffer.put(serializedRow);
+                // Copy data from read-only ByteBuffer to byte array first
+                byte[] rowBytes = new byte[serializedRow.remaining()];
+                serializedRow.get(rowBytes);
+                buffer.putBytes(rowBytes);
                 break;
             default:
                 throw new ImprintException(ErrorType.SERIALIZATION_ERROR, "Unknown type code: " + typeCode);
         }
     }
 
-    //TODO arrays and maps need to be handled better
-    private void serializeArray(List<?> list, ByteBuffer buffer) throws ImprintException {
+    //TODO kinda hacky here, arrays and maps definitely need some functional updates to the flow
+    private void serializeArray(List<?> list, ImprintBuffer buffer) throws ImprintException {
         ImprintSerializers.serializeArray(list, buffer,
             this::getTypeCodeForObject, 
             this::serializeObjectDirect);
     }
     
-    private void serializeMap(Map<?, ?> map, ByteBuffer buffer) throws ImprintException {
+    private void serializeMap(Map<?, ?> map, ImprintBuffer buffer) throws ImprintException {
         ImprintSerializers.serializeMap(map, buffer,
             this::convertToMapKey,
             this::getTypeCodeForObject,
             this::serializeObjectDirect);
     }
-
+    
+    // Helper methods for static serializers
     private TypeCode getTypeCodeForObject(Object obj) {
         var fieldValue = convertToFieldValue(obj);
         try {
@@ -388,7 +390,7 @@ public final class ImprintRecordBuilder {
         }
     }
     
-    private void serializeObjectDirect(Object obj, ByteBuffer buffer) {
+    private void serializeObjectDirect(Object obj, ImprintBuffer buffer) {
         try {
             var fieldValue = convertToFieldValue(obj);
             serializeFieldValue(fieldValue, buffer);
@@ -405,61 +407,23 @@ public final class ImprintRecordBuilder {
         return fields.getSortedFields();
     }
 
-    /**
-     * Serialize components into a single ByteBuffer.
-     */
-    private static ByteBuffer serializeToBuffer(SchemaId schemaId, short[] sortedKeys, Object[] sortedValues, int[] offsets, int fieldCount, ByteBuffer payload) {
-        var header = new Header(new Flags((byte) 0), schemaId, payload.remaining());
-        int directorySize = ImprintRecord.calculateDirectorySize(fieldCount);
-
-        int finalSize = Constants.HEADER_BYTES + directorySize + payload.remaining();
-        var finalBuffer = ByteBuffer.allocate(finalSize);
-        finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
-
-        // Write header
-        finalBuffer.put(Constants.MAGIC);
-        finalBuffer.put(Constants.VERSION);
-        finalBuffer.put(header.getFlags().getValue());
-        finalBuffer.putInt(header.getSchemaId().getFieldSpaceId());
-        finalBuffer.putInt(header.getSchemaId().getSchemaHash());
-        finalBuffer.putInt(header.getPayloadSize());
-
-        // Write directory with FieldValue type codes
-        writeDirectoryToBuffer(sortedKeys, sortedValues, offsets, fieldCount, finalBuffer);
-
-        // Write payload
-        finalBuffer.put(payload);
-
-        finalBuffer.flip();
-        return finalBuffer.asReadOnlyBuffer();
-    }
     
     /**
      * Write directory entries directly to buffer for FieldValue objects.
      */
-    private static void writeDirectoryToBuffer(short[] sortedKeys, Object[] sortedValues, int[] offsets, int fieldCount, ByteBuffer buffer) {
-        // Write field count at the beginning of directory
-        // Optimize VarInt encoding for common case (< 128 fields = single byte)
-        if (fieldCount < 128) {
-            buffer.put((byte) fieldCount);
-        } else {
-            VarInt.encode(fieldCount, buffer);
-        }
+    private static void writeDirectoryToBuffer(short[] sortedKeys, Object[] sortedValues, int[] offsets, int fieldCount, ImprintBuffer buffer) {
+        // Write field count using putVarInt for consistency with ImprintOperations
+        buffer.putVarInt(fieldCount);
 
         // Early return for empty directory
         if (fieldCount == 0)
             return;
-
-
-        //hopefully JIT vectorizes this
         for (int i = 0; i < fieldCount; i++) {
             var fieldValue = (FieldValue) sortedValues[i];
-            int pos = buffer.position();
-            buffer.putShort(pos, sortedKeys[i]);                  // bytes 0-1: field ID
-            buffer.put(pos + 2, fieldValue.typeCode);      // byte 2: type code
-            buffer.putInt(pos + 3, offsets[i]);            // bytes 3-6: offset
-            // Advance buffer position by 7 bytes
-            buffer.position(pos + 7);
+            // Write directory entry: field ID (2 bytes), type code (1 byte), offset (4 bytes)
+            buffer.putShort(sortedKeys[i]);        // bytes 0-1: field ID
+            buffer.putByte(fieldValue.typeCode);   // byte 2: type code
+            buffer.putInt(offsets[i]);             // bytes 3-6: offset
         }
     }
 

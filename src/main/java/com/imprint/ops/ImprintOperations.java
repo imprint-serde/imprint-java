@@ -4,375 +4,393 @@ import com.imprint.Constants;
 import com.imprint.core.*;
 import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
-import com.imprint.util.VarInt;
+import com.imprint.util.ImprintBuffer;
 import lombok.Value;
 import lombok.experimental.UtilityClass;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.*;
 
 @UtilityClass
 public class ImprintOperations {
 
-    /**
-     * Pure bytes-to-bytes merge operation that avoids all object creation.
-     * Performs merge directly on serialized Imprint record buffers.
-     * 
-     * @param firstBuffer Complete serialized Imprint record
-     * @param secondBuffer Complete serialized Imprint record  
-     * @return Merged record as serialized bytes
-     * @throws ImprintException if merge fails
-     */
-    public static ByteBuffer mergeBytes(ByteBuffer firstBuffer, ByteBuffer secondBuffer) throws ImprintException {
-        validateImprintBuffer(firstBuffer, "firstBuffer");
-        validateImprintBuffer(secondBuffer, "secondBuffer");
-
-        // TODO possible could work directly on the originals but duplicate makes the mark values and offsets easy to reason about
-        // duplicates to avoid affecting original positions, we'll need to preserve at least one side
-        var first = firstBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
-        var second = secondBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
-        
-        // Parse headers  
-        var firstHeader = parseHeaderOnly(first);
-        var secondHeader = parseHeaderOnly(second);
-        
-        // Extract directory and payload sections
-        var firstSections = extractSections(first, firstHeader);
-        var secondSections = extractSections(second, secondHeader);
-        
-        // Perform raw merge
-        return mergeRawSections(firstHeader, firstSections, secondSections);
+    public static ImprintBuffer mergeBytes(ImprintBuffer firstBuffer, ImprintBuffer secondBuffer) throws ImprintException {
+        return Merge.mergeBytes(firstBuffer, secondBuffer);
     }
 
-    /**
-     * Parse just the header without advancing buffer past it
-     */
-    private static Header parseHeaderOnly(ByteBuffer buffer) throws ImprintException {
-        return ImprintRecord.parseHeaderFromBuffer(buffer);
+    public static ImprintBuffer projectBytes(ImprintBuffer sourceBuffer, int... fieldIds) throws ImprintException {
+        return Project.projectBytes(sourceBuffer, fieldIds);
     }
+
     
     /**
-     * Extract directory and payload sections from a buffer
+     * Shared utilities and data structures used by both Merge and Project operations.
      */
-    private static ImprintRecord.BufferSections extractSections(ByteBuffer buffer, Header header) throws ImprintException {
-        return ImprintRecord.extractBufferSections(buffer, header);
-    }
-    
-    /**
-     * Merge raw directory and payload sections without object creation
-     * Assumes incoming streams are already both sorted from the serialization process
-     */
-    private static ByteBuffer mergeRawSections(Header firstHeader, ImprintRecord.BufferSections firstSections, ImprintRecord.BufferSections secondSections) throws ImprintException {
-        // Prepare directory iterators
-        var firstDirIter = new RawDirectoryIterator(firstSections.directoryBuffer);
-        var secondDirIter = new RawDirectoryIterator(secondSections.directoryBuffer);
-        
-        // Pre-allocate - worst case is sum of both directory counts
-        int maxEntries = firstSections.directoryCount + secondSections.directoryCount;
-        var mergedDirectoryEntries = new ArrayList<RawDirectoryEntry>(maxEntries);
-        var mergedChunks = new ArrayList<ByteBuffer>(maxEntries);
+    static class Core {
 
-        int totalMergedPayloadSize = 0;
-        int currentMergedOffset = 0;
-        
-        var firstEntry = firstDirIter.hasNext() ? firstDirIter.next() : null;
-        var secondEntry = secondDirIter.hasNext() ? secondDirIter.next() : null;
-        
-        // Merge directories and collect payload chunks
-        while (firstEntry != null || secondEntry != null) {
-            RawDirectoryEntry currentEntry;
-            ByteBuffer sourcePayload;
-            
-            if (firstEntry != null && (secondEntry == null || firstEntry.fieldId <= secondEntry.fieldId)) {
-                // Take from first
-                currentEntry = firstEntry;
-                sourcePayload = getFieldPayload(firstSections.payloadBuffer, firstEntry, firstDirIter);
-                
-                // Skip duplicate in second if present
-                if (secondEntry != null && firstEntry.fieldId == secondEntry.fieldId)
-                    secondEntry = secondDirIter.hasNext() ? secondDirIter.next() : null;
+        static class ImprintBufferSections {
+            final ImprintBuffer directoryBuffer;
+            final ImprintBuffer payloadBuffer;
+            final int directoryCount;
 
-                firstEntry = firstDirIter.hasNext() ? firstDirIter.next() : null;
-            } else {
-                // Take from second
-                currentEntry = secondEntry;
-                sourcePayload = getFieldPayload(secondSections.payloadBuffer, secondEntry, secondDirIter);
-                secondEntry = secondDirIter.hasNext() ? secondDirIter.next() : null;
-            }
-            
-            // Add to merged directory with adjusted offset
-            var adjustedEntry = new RawDirectoryEntry(currentEntry.fieldId, currentEntry.typeCode, currentMergedOffset);
-            mergedDirectoryEntries.add(adjustedEntry);
-            
-            // Collect payload chunk
-            mergedChunks.add(sourcePayload.duplicate());
-            currentMergedOffset += sourcePayload.remaining();
-            totalMergedPayloadSize += sourcePayload.remaining();
-        }
-        
-        // Build final merged buffer
-        return buildSerializedBuffer(firstHeader, mergedDirectoryEntries, mergedChunks, totalMergedPayloadSize);
-    }
-    
-    /**
-     * Get payload bytes for a specific field using iterator state
-     */
-    private static ByteBuffer getFieldPayload(ByteBuffer payload, RawDirectoryEntry entry, RawDirectoryIterator iterator) {
-        int startOffset = entry.offset;
-        int endOffset = iterator.getNextEntryOffset(payload.limit());
-
-        var fieldPayload = payload.duplicate();
-        fieldPayload.position(startOffset);
-        fieldPayload.limit(endOffset);
-        return fieldPayload.slice();
-    }
-    
-
-    /**
-     * Pure bytes-to-bytes projection operation that avoids all object creation.
-     * Projects a subset of fields directly from a serialized Imprint record.
-     * 
-     * @param sourceBuffer Complete serialized Imprint record
-     * @param fieldIds Array of field IDs to include in projection
-     * @return Projected record as serialized bytes
-     * @throws ImprintException if projection fails
-     */
-    public static ByteBuffer projectBytes(ByteBuffer sourceBuffer, int... fieldIds) throws ImprintException {
-        validateImprintBuffer(sourceBuffer, "sourceBuffer");
-        
-        if (fieldIds == null || fieldIds.length == 0) {
-            return createEmptyRecordBytes();
-        }
-
-        var sortedFieldIds = fieldIds.clone();
-        Arrays.sort(sortedFieldIds);
-        
-        // Duplicate avoids affecting original position which we'll need later
-        var source = sourceBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
-        
-        // Parse header
-        var header = parseHeaderOnly(source);
-        
-        // Extract sections
-        var sections = extractSections(source, header);
-        
-        // Perform raw projection
-        return projectRawSections(header, sections, sortedFieldIds);
-    }
-
-    /**
-     * Project raw sections without object creation using optimized merge algorithm.
-     */
-    private static ByteBuffer projectRawSections(Header originalHeader, ImprintRecord.BufferSections sections, int[] sortedRequestedFields) throws ImprintException {
-        
-        if (sortedRequestedFields.length == 0) {
-            return buildSerializedBuffer(originalHeader, new RawDirectoryEntry[0], new ByteBuffer[0]);
-        }
-        
-        // Use pre-sized ArrayLists to avoid System.arraycopy but still be efficient
-        var projectedEntries = new ArrayList<RawDirectoryEntry>(sortedRequestedFields.length);
-        var payloadChunks = new ArrayList<ByteBuffer>(sortedRequestedFields.length);
-        int totalProjectedPayloadSize = 0;
-        int currentOffset = 0;
-        int requestedIndex = 0;
-        
-        // Optimize: Cache payload buffer reference to avoid getter calls
-        var payloadBuffer = sections.payloadBuffer;
-        
-        // Merge algorithm: two-pointer approach through sorted sequences
-        var dirIterator = new RawDirectoryIterator(sections.directoryBuffer);
-        RawDirectoryEntry currentEntry = dirIterator.hasNext() ? dirIterator.next() : null;
-        
-        while (currentEntry != null && requestedIndex < sortedRequestedFields.length) {
-            int fieldId = currentEntry.fieldId;
-            int targetFieldId = sortedRequestedFields[requestedIndex];
-            
-            if (fieldId == targetFieldId) {
-                var fieldPayload = getFieldPayload(payloadBuffer, currentEntry, dirIterator);
-                
-                // Add to projection with adjusted offset
-                projectedEntries.add(new RawDirectoryEntry(currentEntry.fieldId, currentEntry.typeCode, currentOffset));
-                
-                // Collect payload chunk here  - fieldPayload should already sliced
-                payloadChunks.add(fieldPayload);
-                
-                int payloadSize = fieldPayload.remaining();
-                currentOffset += payloadSize;
-                totalProjectedPayloadSize += payloadSize;
-                
-                // Advance both pointers - handle dupes by advancing to next unique field hopefully
-                do {
-                    requestedIndex++;
-                } while (requestedIndex < sortedRequestedFields.length && sortedRequestedFields[requestedIndex] == targetFieldId);
-                
-                currentEntry = dirIterator.hasNext() ? dirIterator.next() : null;
-            } else if (fieldId < targetFieldId) {
-                // Directory field is smaller, advance directory pointer
-                currentEntry = dirIterator.hasNext() ? dirIterator.next() : null;
-            } else {
-                // fieldId > targetFieldId - implies requested field isn't in the directory so advance requested pointer
-                requestedIndex++;
+            ImprintBufferSections(ImprintBuffer directoryBuffer, ImprintBuffer payloadBuffer, int directoryCount) {
+                this.directoryBuffer = directoryBuffer;
+                this.payloadBuffer = payloadBuffer;
+                this.directoryCount = directoryCount;
             }
         }
-        
-        return buildSerializedBuffer(originalHeader, projectedEntries, payloadChunks, totalProjectedPayloadSize);
-    }
 
-    /**
-     * Build a serialized Imprint record buffer from header, directory entries, and payload chunks.
-     */
-    private static ByteBuffer buildSerializedBuffer(Header originalHeader, RawDirectoryEntry[] directoryEntries, ByteBuffer[] payloadChunks) {
-        return buildSerializedBuffer(originalHeader, Arrays.asList(directoryEntries), Arrays.asList(payloadChunks), 0);
-    }
-    
-    private static ByteBuffer buildSerializedBuffer(Header originalHeader, List<RawDirectoryEntry> directoryEntries, List<ByteBuffer> payloadChunks, int totalPayloadSize) {
-        int directorySize = ImprintRecord.calculateDirectorySize(directoryEntries.size());
-        int totalSize = Constants.HEADER_BYTES + directorySize + totalPayloadSize;
-        var finalBuffer = ByteBuffer.allocate(totalSize);
-        finalBuffer.order(ByteOrder.LITTLE_ENDIAN);
-        
-        // header (preserve original schema)
-        finalBuffer.put(Constants.MAGIC);
-        finalBuffer.put(Constants.VERSION);
-        finalBuffer.put(originalHeader.getFlags().getValue());
-        finalBuffer.putInt(originalHeader.getSchemaId().getFieldSpaceId());
-        finalBuffer.putInt(originalHeader.getSchemaId().getSchemaHash());
-        finalBuffer.putInt(totalPayloadSize);
-        
-        // directory
-        VarInt.encode(directoryEntries.size(), finalBuffer);
-        for (var entry : directoryEntries) {
-            finalBuffer.putShort(entry.fieldId);
-            finalBuffer.put(entry.typeCode);
-            finalBuffer.putInt(entry.offset);
-        }
-        
-        // payload
-        for (var chunk : payloadChunks)
-            finalBuffer.put(chunk);
-
-        finalBuffer.flip();
-        return finalBuffer.asReadOnlyBuffer();
-    }
-    
-    
-    /**
-     * Create an empty record as serialized bytes
-     */
-    private static ByteBuffer createEmptyRecordBytes() {
-        // header + empty directory + empty payload
-        var buffer = ByteBuffer.allocate(Constants.HEADER_BYTES + 1); // +1 for varint 0
-        buffer.order(ByteOrder.LITTLE_ENDIAN);
-        
-        // header for empty record
-        buffer.put(Constants.MAGIC);
-        buffer.put(Constants.VERSION);
-        buffer.put((byte) 0x01);
-        buffer.putInt(0);
-        buffer.putInt(0);
-        buffer.putInt(0);
-        
-        // empty directory
-        VarInt.encode(0, buffer);
-        
-        buffer.flip();
-        return buffer.asReadOnlyBuffer();
-    }
-
-    /**
-     * Validates that a ByteBuffer contains valid Imprint data by checking magic bytes and basic structure.
-     * 
-     * @param buffer Buffer to validate
-     * @param paramName Parameter name for error messages
-     * @throws ImprintException if buffer is invalid
-     */
-    private static void validateImprintBuffer(ByteBuffer buffer, String paramName) throws ImprintException {
-        if (buffer == null) {
-            throw new ImprintException(ErrorType.INVALID_BUFFER, paramName + " cannot be null");
-        }
-        
-        if (buffer.remaining() < Constants.HEADER_BYTES) {
-            throw new ImprintException(ErrorType.INVALID_BUFFER, 
-                paramName + " too small to contain valid Imprint header (minimum " + Constants.HEADER_BYTES + " bytes)");
+        @Value
+        static class RawDirectoryEntry {
+            short fieldId;
+            byte typeCode;
+            int offset;
         }
 
-        // Check invariants without advancing buffer position
-        var duplicate = buffer.duplicate();
-        byte magic = duplicate.get();
-        byte version = duplicate.get();
-        if (magic != Constants.MAGIC)
-            throw new ImprintException(ErrorType.INVALID_BUFFER, paramName + " does not contain valid Imprint magic byte");
-        if (version != Constants.VERSION)
-            throw new ImprintException(ErrorType.INVALID_BUFFER, paramName + " contains unsupported Imprint version: " + version);
-    }
+        static class ImprintBufferDirectoryIterator {
+            private final ImprintBuffer buffer;
+            private final int totalCount;
+            private int currentIndex;
 
-    /**
-     * Directory entry container used for raw byte operations
-     */
-    @Value
-    private static class RawDirectoryEntry {
-        short fieldId;
-        byte typeCode;
-        int offset;
-    }
+            ImprintBufferDirectoryIterator(ImprintBuffer directoryBuffer) {
+                this.buffer = directoryBuffer;
+                this.buffer.position(0);
+                this.totalCount = directoryBuffer.remaining() / Constants.DIR_ENTRY_BYTES;
+                this.currentIndex = 0;
+            }
 
-    /**
-     * Iterator that parses directory entries directly from raw bytes
-     */
-    private static class RawDirectoryIterator {
-        private final ByteBuffer buffer;
-        private final int totalCount;
-        private final int directoryStartPos;
-        private int currentIndex;
-        
-        RawDirectoryIterator(ByteBuffer directoryBuffer) throws ImprintException {
-            this.buffer = directoryBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
-            
-            // Read count and advance to first entry
-            var countResult = VarInt.decode(buffer);
-            this.totalCount = countResult.getValue();
-            this.directoryStartPos = buffer.position();
-            this.currentIndex = 0;
+            boolean hasNext() {
+                return currentIndex < totalCount;
+            }
+
+            RawDirectoryEntry next() {
+                if (!hasNext()) {
+                    throw new RuntimeException("No more directory entries");
+                }
+
+                short fieldId = buffer.getShort();
+                byte typeCode = buffer.get();
+                int offset = buffer.getInt();
+                currentIndex++;
+                
+                return new RawDirectoryEntry(fieldId, typeCode, offset);
+            }
+
+            int getNextEntryOffset(int fallbackOffset) {
+                if (currentIndex >= totalCount) {
+                    return fallbackOffset;
+                }
+
+                int savedPos = buffer.position();
+                buffer.position(savedPos + 3); // Skip fieldId and typeCode
+                int offset = buffer.getInt();
+                buffer.position(savedPos);
+                return offset;
+            }
         }
-        
-        boolean hasNext() {
-            return currentIndex < totalCount;
-        }
-        
-        RawDirectoryEntry next() throws ImprintException {
-            if (!hasNext())
-                throw new RuntimeException("No more directory entries");
 
-            if (buffer.remaining() < Constants.DIR_ENTRY_BYTES)
-                throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for directory entry");
+        static Header parseHeaderFromImprintBuffer(ImprintBuffer buffer) throws ImprintException {
+            // Use duplicate to avoid modifying the original buffer
+            var headerBuffer = buffer.duplicate();
+            headerBuffer.position(0);
 
-            short fieldId = buffer.getShort();
-            byte typeCode = buffer.get();
-            int offset = buffer.getInt();
-            
-            currentIndex++;
-            return new RawDirectoryEntry(fieldId, typeCode, offset);
+            // Read header components using ImprintBuffer's optimized operations
+            byte magic = headerBuffer.get();
+            byte version = headerBuffer.get();
+            byte flags = headerBuffer.get();
+            int fieldSpaceId = headerBuffer.getInt();
+            int schemaHash = headerBuffer.getInt();
+            int payloadSize = headerBuffer.getInt();
+
+            if (magic != Constants.MAGIC) {
+                throw new ImprintException(ErrorType.INVALID_BUFFER, "Invalid magic byte");
+            }
+            if (version != Constants.VERSION) {
+                throw new ImprintException(ErrorType.INVALID_BUFFER, "Unsupported version: " + version);
+            }
+
+            return new Header(new Flags(flags), new SchemaId(fieldSpaceId, schemaHash), payloadSize);
         }
-        
+
         /**
-         * Get the offset of the next entry without state overhead.
-         * Returns the provided fallback if this is the last entry.
+         * Extract directory and payload sections directly from ImprintBuffer.
          */
-        int getNextEntryOffset(int fallbackOffset) {
-            if (currentIndex >= totalCount)
-                return fallbackOffset;
+        static ImprintBufferSections extractSectionsFromImprintBuffer(ImprintBuffer buffer, Header header) {
+            // Use duplicate to avoid modifying the original buffer
+            var workingBuffer = buffer.duplicate();
+            workingBuffer.position(Constants.HEADER_BYTES);
 
-            // Calculate position of next entry directly
-            int nextEntryPos = directoryStartPos + (currentIndex * Constants.DIR_ENTRY_BYTES);
-            
-            // Bounds check - optimized to single comparison
-            if (nextEntryPos + 7 > buffer.limit()) { // DIR_ENTRY_BYTES = 7
-                return fallbackOffset;
+            // Read directory count using ImprintBuffer's VarInt operations
+            int directoryCount = workingBuffer.getVarInt();
+            int directoryStart = workingBuffer.position();
+            int directorySize = directoryCount * Constants.DIR_ENTRY_BYTES;
+            int payloadStart = directoryStart + directorySize;
+
+            // Create sliced buffers for directory and payload
+            var directoryBuffer = workingBuffer.slice();
+            directoryBuffer.limit(directorySize);
+
+            workingBuffer.position(payloadStart);
+            var payloadBuffer = workingBuffer.slice();
+            payloadBuffer.limit(header.getPayloadSize());
+
+            return new ImprintBufferSections(directoryBuffer, payloadBuffer, directoryCount);
+        }
+
+        static void validateImprintBuffer(ImprintBuffer buffer, String paramName) throws ImprintException {
+            if (buffer == null) {
+                throw new ImprintException(ErrorType.INVALID_BUFFER, paramName + " cannot be null");
             }
+
+            if (buffer.remaining() < Constants.HEADER_BYTES) {
+                throw new ImprintException(ErrorType.INVALID_BUFFER,
+                        paramName + " too small to contain valid Imprint header (minimum " + Constants.HEADER_BYTES + " bytes)");
+            }
+
+            // Check magic and version using ImprintBuffer operations without modifying original buffer
+            var validationBuffer = buffer.duplicate();
+            validationBuffer.position(0);
+            byte magic = validationBuffer.get();
+            byte version = validationBuffer.get();
+
+            if (magic != Constants.MAGIC) {
+                throw new ImprintException(ErrorType.INVALID_BUFFER, paramName + " does not contain valid Imprint magic byte");
+            }
+            if (version != Constants.VERSION) {
+                throw new ImprintException(ErrorType.INVALID_BUFFER, paramName + " contains unsupported Imprint version: " + version);
+            }
+        }
+
+        /**
+         * Create an empty record as ImprintBuffer.
+         */
+        static ImprintBuffer createEmptyRecordBytes() {
+            // header + empty directory + empty payload
+            var buffer = ImprintBuffer.growable(Constants.HEADER_BYTES + 1); // +1 for varint 0
+
+            // header for empty record
+            buffer.putUnsafeByte(Constants.MAGIC);
+            buffer.putUnsafeByte(Constants.VERSION);
+            buffer.putUnsafeByte((byte) 0x01);
+            buffer.putUnsafeInt(0);
+            buffer.putUnsafeInt(0);
+            buffer.putUnsafeInt(0);
+
+            // empty directory
+            buffer.putVarInt(0);
+
+            // Set final position and limit
+            int finalSize = buffer.position();
+            buffer.position(0);
+            buffer.limit(finalSize);
+            return buffer;
+        }
+
+        static int getFieldSizeOptimized(ImprintBuffer payload, int startOffset, ImprintBufferDirectoryIterator iterator) {
+            int endOffset = iterator.getNextEntryOffset(payload.remaining());
+            return endOffset - startOffset;
+        }
+
+        static void copyField(ImprintBuffer output, ImprintBuffer source, int offset, int size) {
+            if (size <= 0) return;
+            output.putBytes(source.array(), source.arrayOffset() + offset, size);
+        }
+
+        static ImprintBuffer buildFinalBuffer(Header header, List<RawDirectoryEntry> entries, 
+                                              ImprintBuffer output, int estimatedDirectorySize, 
+                                              int actualPayloadSize, int headerAndDirSize) {
             
-            // Read just the offset field (skip fieldId and typeCode)
-            return buffer.getInt(nextEntryPos + 3); // 2 bytes fieldId + 1 byte typeCode = 3 offset
+            // Calculate actual directory size
+            int actualDirectorySize = ImprintRecord.calculateDirectorySize(entries.size());
+            int actualTotalSize = Constants.HEADER_BYTES + actualDirectorySize + actualPayloadSize;
+
+            // If directory size changed, move payload using UNSAFE
+            int payloadStartPos = Constants.HEADER_BYTES + actualDirectorySize;
+            if (actualDirectorySize != estimatedDirectorySize) {
+                output.moveMemory(headerAndDirSize, payloadStartPos, actualPayloadSize);
+            }
+
+            // Write header and directory at the beginning
+            output.position(0);
+            output.putUnsafeByte(Constants.MAGIC);
+            output.putUnsafeByte(Constants.VERSION);
+            output.putUnsafeByte(header.getFlags().getValue());
+            output.putUnsafeInt(header.getSchemaId().getFieldSpaceId());
+            output.putUnsafeInt(header.getSchemaId().getSchemaHash());
+            output.putUnsafeInt(actualPayloadSize);
+
+            // Write directory
+            output.putVarInt(entries.size());
+            for (var entry : entries) {
+                output.putUnsafeShort(entry.fieldId);
+                output.putUnsafeByte(entry.typeCode);
+                output.putUnsafeInt(entry.offset);
+            }
+
+            output.position(0);
+            output.limit(actualTotalSize);
+            return output;
+        }
+    }
+
+    // ========== MERGE OPERATIONS ==========
+    
+    public static class Merge {
+
+        public static ImprintBuffer mergeBytes(ImprintBuffer firstBuffer, ImprintBuffer secondBuffer) throws ImprintException {
+            Core.validateImprintBuffer(firstBuffer, "firstBuffer");
+            Core.validateImprintBuffer(secondBuffer, "secondBuffer");
+
+            var firstHeader = Core.parseHeaderFromImprintBuffer(firstBuffer);
+            var secondHeader = Core.parseHeaderFromImprintBuffer(secondBuffer);
+
+            var firstSections = Core.extractSectionsFromImprintBuffer(firstBuffer, firstHeader);
+            var secondSections = Core.extractSectionsFromImprintBuffer(secondBuffer, secondHeader);
+
+            return mergeRawSections(firstHeader, firstSections, secondSections);
+        }
+
+        private static ImprintBuffer mergeRawSections(Header firstHeader, Core.ImprintBufferSections firstSections, Core.ImprintBufferSections secondSections) {
+
+            // Estimate reasonable initial size
+            int maxFields = firstSections.directoryCount + secondSections.directoryCount;
+            int estimatedDirectorySize = ImprintRecord.calculateDirectorySize(maxFields);
+            int estimatedPayloadSize = firstSections.payloadBuffer.remaining() + secondSections.payloadBuffer.remaining();
+            int estimatedTotalSize = Constants.HEADER_BYTES + estimatedDirectorySize + estimatedPayloadSize;
+
+            // 1. Create growable buffer
+            var output = ImprintBuffer.growable(estimatedTotalSize);
+            // Reserve space for header and directory - write payload first
+            int headerAndDirSize = Constants.HEADER_BYTES + estimatedDirectorySize;
+            output.position(headerAndDirSize);
+
+            // 2. Merge fields directly into growable buffer
+            var mergedEntries = new ArrayList<Core.RawDirectoryEntry>(maxFields);
+            int actualPayloadSize = mergeFieldsDirectToBuffer(output, firstSections, secondSections, mergedEntries);
+
+            // 3. Build and finalize the buffer
+            return Core.buildFinalBuffer(firstHeader, mergedEntries, output,
+                                                 estimatedDirectorySize, actualPayloadSize, headerAndDirSize);
+        }
+
+        private static int mergeFieldsDirectToBuffer(ImprintBuffer output, Core.ImprintBufferSections firstSections, Core.ImprintBufferSections secondSections, List<Core.RawDirectoryEntry> mergedEntries) {
+
+            var firstIter = new Core.ImprintBufferDirectoryIterator(firstSections.directoryBuffer);
+            var secondIter = new Core.ImprintBufferDirectoryIterator(secondSections.directoryBuffer);
+
+            int currentOffset = 0;
+            int initialPosition = output.position();
+
+            var firstEntry = firstIter.hasNext() ? firstIter.next() : null;
+            var secondEntry = secondIter.hasNext() ? secondIter.next() : null;
+
+            while (firstEntry != null || secondEntry != null) {
+                Core.RawDirectoryEntry selectedEntry;
+                ImprintBuffer sourcePayload;
+                Core.ImprintBufferDirectoryIterator sourceIter;
+
+                if (firstEntry != null && (secondEntry == null || firstEntry.fieldId <= secondEntry.fieldId)) {
+                    selectedEntry = firstEntry;
+                    sourcePayload = firstSections.payloadBuffer;
+                    sourceIter = firstIter;
+
+                    if (secondEntry != null && firstEntry.fieldId == secondEntry.fieldId) {
+                        secondEntry = secondIter.hasNext() ? secondIter.next() : null;
+                    }
+
+                    firstEntry = firstIter.hasNext() ? firstIter.next() : null;
+                } else {
+                    selectedEntry = secondEntry;
+                    sourcePayload = secondSections.payloadBuffer;
+                    sourceIter = secondIter;
+
+                    secondEntry = secondIter.hasNext() ? secondIter.next() : null;
+                }
+
+                int fieldSize = Core.getFieldSizeOptimized(sourcePayload, selectedEntry.offset, sourceIter);
+                Core.copyField(output, sourcePayload, selectedEntry.offset, fieldSize);
+
+                mergedEntries.add(new Core.RawDirectoryEntry(selectedEntry.fieldId, selectedEntry.typeCode, currentOffset));
+                currentOffset += fieldSize;
+            }
+
+            return output.position() - initialPosition;
+        }
+    }
+    
+    public static class Project {
+
+        public static ImprintBuffer projectBytes(ImprintBuffer sourceBuffer, int... fieldIds) throws ImprintException {
+            Core.validateImprintBuffer(sourceBuffer, "sourceBuffer");
+            if (fieldIds == null || fieldIds.length == 0)
+                return Core.createEmptyRecordBytes();
+
+            var sortedFieldIds = fieldIds.clone();
+            Arrays.sort(sortedFieldIds);
+            var header = Core.parseHeaderFromImprintBuffer(sourceBuffer);
+            var sections = Core.extractSectionsFromImprintBuffer(sourceBuffer, header);
+            return projectRawSections(header, sections, sortedFieldIds);
+        }
+
+        private static ImprintBuffer projectRawSections(Header originalHeader, Core.ImprintBufferSections sections, int[] sortedRequestedFields) {
+            if (sortedRequestedFields.length == 0)
+                return Core.createEmptyRecordBytes();
+
+            // Estimate reasonable initial size
+            int maxFields = sortedRequestedFields.length;
+            int estimatedDirectorySize = ImprintRecord.calculateDirectorySize(maxFields);
+            int estimatedPayloadSize = sections.payloadBuffer.remaining(); // Conservative estimate
+            int estimatedTotalSize = Constants.HEADER_BYTES + estimatedDirectorySize + estimatedPayloadSize;
+
+            // 1. Create growable buffer
+            var output = ImprintBuffer.growable(estimatedTotalSize);
+            // Reserve space for header and directory - write payload first
+            int headerAndDirSize = Constants.HEADER_BYTES + estimatedDirectorySize;
+            output.position(headerAndDirSize);
+
+            // 2. Project fields directly into growable buffer
+            var projectedEntries = new ArrayList<Core.RawDirectoryEntry>(maxFields);
+            int actualPayloadSize = projectFieldsDirectToBuffer(output, sections, sortedRequestedFields, projectedEntries);
+
+            // 3. Build and finalize the buffer
+            return Core.buildFinalBuffer(originalHeader, projectedEntries, output, estimatedDirectorySize, actualPayloadSize, headerAndDirSize);
+        }
+
+        private static int projectFieldsDirectToBuffer(ImprintBuffer output, Core.ImprintBufferSections sections, int[] sortedRequestedFields, List<Core.RawDirectoryEntry> projectedEntries) {
+            var dirIterator = new Core.ImprintBufferDirectoryIterator(sections.directoryBuffer);
+            
+            int currentOffset = 0;
+            int initialPosition = output.position();
+            int requestedIndex = 0;
+
+            // Merge algorithm: two-pointer approach through sorted sequences
+            var currentEntry = dirIterator.hasNext() ? dirIterator.next() : null;
+
+            while (currentEntry != null && requestedIndex < sortedRequestedFields.length) {
+                int fieldId = currentEntry.fieldId;
+                int targetFieldId = sortedRequestedFields[requestedIndex];
+
+                if (fieldId == targetFieldId) {
+                    int fieldSize = Core.getFieldSizeOptimized(sections.payloadBuffer, currentEntry.offset, dirIterator);
+                    Core.copyField(output, sections.payloadBuffer, currentEntry.offset, fieldSize);
+
+                    projectedEntries.add(new Core.RawDirectoryEntry(currentEntry.fieldId, currentEntry.typeCode, currentOffset));
+                    currentOffset += fieldSize;
+
+                    // Advance both pointers - handle dupes by advancing to next unique field
+                    do {
+                        requestedIndex++;
+                    } while (requestedIndex < sortedRequestedFields.length && sortedRequestedFields[requestedIndex] == targetFieldId);
+
+                    currentEntry = dirIterator.hasNext() ? dirIterator.next() : null;
+                } else if (fieldId < targetFieldId) {
+                    // Directory field is smaller, advance directory pointer
+                    currentEntry = dirIterator.hasNext() ? dirIterator.next() : null;
+                } else {
+                    // fieldId > targetFieldId - implies requested field isn't in the directory so advance requested pointer
+                    requestedIndex++;
+                }
+            }
+            return output.position() - initialPosition;
         }
     }
 }

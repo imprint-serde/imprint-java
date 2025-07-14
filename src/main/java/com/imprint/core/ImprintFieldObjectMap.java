@@ -1,15 +1,17 @@
 package com.imprint.core;
 
+import lombok.Value;
+
 import java.util.Arrays;
 import java.util.stream.IntStream;
 
 /**
  * Specialized short→object map optimized for ImprintRecordBuilder field IDs.
- * Basically a copy of EclipseCollections's primitive map:
+ * Implementation
  * - No key-value boxing/unboxing
  * - Primitive int16 keys
  * - Open addressing with linear probing
- * - Sort values in place and return without allocation (subsequently poisons the map)
+ * - Sacrifices map to sort values in place and return without allocation/copy
  */
 final class ImprintFieldObjectMap<T> {
     private static final int DEFAULT_CAPACITY = 64;
@@ -20,6 +22,8 @@ final class ImprintFieldObjectMap<T> {
     private Object[] values;
     private int size;
     private int threshold;
+    //sorting in place and returning the map's internal references means we don't have to allocate or copy to a new array;
+    //this is definitely a suspicious pattern at best though
     private boolean poisoned = false;
     
     public ImprintFieldObjectMap() {
@@ -272,11 +276,12 @@ final class ImprintFieldObjectMap<T> {
     
     /**
      * Sort the first 'count' entries by key using insertion sort (should be fast enough for small arrays).
+     * //TODO some duplication in here with the sorted values copy
      */
     private void sortEntriesByKey(int count) {
         for (int i = 1; i < count; i++) {
             short key = keys[i];
-            Object value = values[i];
+            var value = values[i];
             int j = i - 1;
             
             while (j >= 0 && keys[j] > key) {
@@ -341,16 +346,11 @@ final class ImprintFieldObjectMap<T> {
     /**
      * Result holder for in-place sorted fields - returns both keys and values.
      */
-    public static final class SortedFieldsResult {
-        public final short[] keys;
-        public final Object[] values;
-        public final int count;
-
-        SortedFieldsResult(short[] keys, Object[] values, int count) {
-            this.keys = keys;
-            this.values = values;
-            this.count = count;
-        }
+    @Value
+    public static class SortedFieldsResult {
+        short[] keys;
+        Object[] values;
+        int count;
     }
 
     /**
@@ -358,6 +358,7 @@ final class ImprintFieldObjectMap<T> {
      * WARNING: Modifies internal state, and renders map operations unstable and in an illegal state.
      */
     public SortedFieldsResult getSortedFields() {
+        //It makes more sense to poison the map here for consistency, even though technically it isn't with 0 fields.
         if (size == 0) {
             poisoned = true;
             return new SortedFieldsResult(keys, values, 0);
@@ -366,7 +367,6 @@ final class ImprintFieldObjectMap<T> {
         compactEntries();
         sortEntriesByKey(size);
         poisoned = true;
-        
         return new SortedFieldsResult(keys, values, size);
     }
 }

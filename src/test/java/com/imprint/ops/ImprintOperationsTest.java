@@ -4,6 +4,7 @@ import com.imprint.core.Directory;
 import com.imprint.core.ImprintRecord;
 import com.imprint.core.SchemaId;
 import com.imprint.error.ImprintException;
+import com.imprint.util.ImprintBuffer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -86,7 +87,7 @@ class ImprintOperationsTest {
         @DisplayName("should handle single field projection")
         void shouldHandleSingleFieldProjection() throws ImprintException {
             // When projecting a single field
-            ImprintRecord projected = multiFieldRecord.project(3);
+            var projected = multiFieldRecord.project(3);
 
             // Then only that field should be present
             assertEquals(1, projected.getDirectory().size());
@@ -107,9 +108,9 @@ class ImprintOperationsTest {
             // Then all fields should be present with matching values
             assertEquals(multiFieldRecord.getDirectory().size(), projected.getDirectory().size());
 
-            for (Directory entry : multiFieldRecord.getDirectory()) {
-                Object originalValue = multiFieldRecord.getValue(entry.getId());
-                Object projectedValue = projected.getValue(entry.getId());
+            for (var entry : multiFieldRecord.getDirectory()) {
+                var originalValue = multiFieldRecord.getValue(entry.getId());
+                var projectedValue = projected.getValue(entry.getId());
                 
                 // Handle byte arrays specially since they don't use content equality
                 if (originalValue instanceof byte[] && projectedValue instanceof byte[]) {
@@ -126,7 +127,7 @@ class ImprintOperationsTest {
         @DisplayName("should handle empty projection")
         void shouldHandleEmptyProjection() throws ImprintException {
             // When projecting no fields
-            ImprintRecord projected = multiFieldRecord.project();
+            var projected = multiFieldRecord.project();
 
             // Then result should be empty but valid
             assertEquals(0, projected.getDirectory().size());
@@ -137,7 +138,7 @@ class ImprintOperationsTest {
         @DisplayName("should ignore nonexistent fields")
         void shouldIgnoreNonexistentFields() throws ImprintException {
             // When projecting mix of existing and non-existing fields
-            ImprintRecord projected = multiFieldRecord.project(1, 99, 100);
+            var projected = multiFieldRecord.project(1, 99, 100);
 
             // Then only existing fields should be included
             assertEquals(1, projected.getDirectory().size());
@@ -150,7 +151,7 @@ class ImprintOperationsTest {
         @DisplayName("should deduplicate requested fields")
         void shouldDeduplicateRequestedFields() throws ImprintException {
             // When projecting the same field multiple times
-            ImprintRecord projected = multiFieldRecord.project(1, 1, 1);
+            var projected = multiFieldRecord.project(1, 1, 1);
 
             // Then field should only appear once
             assertEquals(1, projected.getDirectory().size());
@@ -161,7 +162,7 @@ class ImprintOperationsTest {
         @DisplayName("should handle projection from empty record")
         void shouldHandleProjectionFromEmptyRecord() throws ImprintException {
             // When projecting any fields from empty record
-            ImprintRecord projected = emptyRecord.project(1, 2, 3);
+            var projected = emptyRecord.project(1, 2, 3);
 
             // Then result should be empty but valid
             assertEquals(0, projected.getDirectory().size());
@@ -175,7 +176,7 @@ class ImprintOperationsTest {
             byte[] originalBytes = multiFieldRecord.getBytes(7);
 
             // When projecting that field
-            ImprintRecord projected = multiFieldRecord.project(7);
+            var projected = multiFieldRecord.project(7);
 
             // Then the byte representation should be exactly preserved
             byte[] projectedBytes = projected.getBytes(7);
@@ -187,7 +188,7 @@ class ImprintOperationsTest {
         @DisplayName("should reduce payload size when projecting subset")
         void shouldReducePayloadSizeWhenProjectingSubset() throws ImprintException {
             // Given a record with large and small fields
-            ImprintRecord largeRecord = ImprintRecord.builder(testSchema)
+            var largeRecord = ImprintRecord.builder(testSchema)
                     .field(1, 42)                           // 4 bytes
                     .field(2, "x".repeat(1000))           // ~1000+ bytes
                     .field(3, 123L)                        // 8 bytes
@@ -197,7 +198,7 @@ class ImprintOperationsTest {
             int originalPayloadSize = largeRecord.getSerializedSize();
 
             // When projecting only the small fields
-            ImprintRecord projected = largeRecord.project(1, 3);
+            var projected = largeRecord.project(1, 3);
 
             // Then the payload size should be significantly smaller
             assertTrue(projected.getSerializedSize() < originalPayloadSize,
@@ -217,18 +218,18 @@ class ImprintOperationsTest {
         @DisplayName("should merge records with distinct fields")
         void shouldMergeRecordsWithDistinctFields() throws ImprintException {
             // Given two records with different fields
-            ImprintRecord record1 = ImprintRecord.builder(testSchema)
+            var record1 = ImprintRecord.builder(testSchema)
                     .field(1, 42)
                     .field(3, "hello")
                     .build();
 
-            ImprintRecord record2 = ImprintRecord.builder(testSchema)
+            var record2 = ImprintRecord.builder(testSchema)
                     .field(2, true)
                     .field(4, 123L)
                     .build();
 
             // When merging the records
-            ImprintRecord merged = record1.merge(record2);
+            var merged = record1.merge(record2);
 
             // Then all fields should be present
             assertEquals(4, merged.getDirectory().size());
@@ -249,18 +250,18 @@ class ImprintOperationsTest {
         @DisplayName("should merge records with overlapping fields")
         void shouldMergeRecordsWithOverlappingFields() throws ImprintException {
             // Given two records with overlapping fields
-            ImprintRecord record1 = ImprintRecord.builder(testSchema)
+            var record1 = ImprintRecord.builder(testSchema)
                     .field(2, "first")
                     .field(3, 42)
                     .build();
 
-            ImprintRecord record2 = ImprintRecord.builder(testSchema)
+            var record2 = ImprintRecord.builder(testSchema)
                     .field(1, true)
                     .field(2, "second")  // Overlapping field
                     .build();
 
             // When merging the records
-            ImprintRecord merged = record1.merge(record2);
+            var merged = record1.merge(record2);
 
             // Then first record's values should take precedence for duplicates
             assertEquals(3, merged.getDirectory().size());
@@ -273,19 +274,19 @@ class ImprintOperationsTest {
         @DisplayName("should preserve schema id from first record")
         void shouldPreserveSchemaIdFromFirstRecord() throws ImprintException {
             // Given two records with different schema IDs
-            SchemaId schema1 = new SchemaId(1, 0xdeadbeef);
-            SchemaId schema2 = new SchemaId(1, 0xcafebabe);
+            var schema1 = new SchemaId(1, 0xdeadbeef);
+            var schema2 = new SchemaId(1, 0xcafebabe);
 
-            ImprintRecord record1 = ImprintRecord.builder(schema1)
+            var record1 = ImprintRecord.builder(schema1)
                     .field(1, 42)
                     .build();
 
-            ImprintRecord record2 = ImprintRecord.builder(schema2)
+            var record2 = ImprintRecord.builder(schema2)
                     .field(2, true)
                     .build();
 
             // When merging the records
-            ImprintRecord merged = record1.merge(record2);
+            var merged = record1.merge(record2);
 
             // Then schema ID from first record should be preserved
             assertEquals(schema1, merged.getHeader().getSchemaId());
@@ -295,8 +296,8 @@ class ImprintOperationsTest {
         @DisplayName("should handle merge with empty record")
         void shouldHandleMergeWithEmptyRecord() throws ImprintException {
             // When merging with empty record
-            ImprintRecord merged1 = multiFieldRecord.merge(emptyRecord);
-            ImprintRecord merged2 = emptyRecord.merge(multiFieldRecord);
+            var merged1 = multiFieldRecord.merge(emptyRecord);
+            var merged2 = emptyRecord.merge(multiFieldRecord);
 
             // Then results should contain all original fields
             assertEquals(multiFieldRecord.getDirectory().size(), merged1.getDirectory().size());
@@ -304,9 +305,9 @@ class ImprintOperationsTest {
 
             // And values should be preserved
             for (Directory entry : multiFieldRecord.getDirectory()) {
-                Object originalValue = multiFieldRecord.getValue(entry.getId());
-                Object merged1Value = merged1.getValue(entry.getId());
-                Object merged2Value = merged2.getValue(entry.getId());
+                var originalValue = multiFieldRecord.getValue(entry.getId());
+                var merged1Value = merged1.getValue(entry.getId());
+                var merged2Value = merged2.getValue(entry.getId());
                 
                 // Handle byte arrays specially since they don't use content equality
                 if (originalValue instanceof byte[]) {
@@ -327,7 +328,7 @@ class ImprintOperationsTest {
         @DisplayName("should handle merge of two empty records")
         void shouldHandleMergeOfTwoEmptyRecords() throws ImprintException {
             // When merging two empty records
-            ImprintRecord merged = emptyRecord.merge(emptyRecord);
+            var merged = emptyRecord.merge(emptyRecord);
 
             // Then result should be empty but valid
             assertEquals(0, merged.getDirectory().size());
@@ -338,18 +339,18 @@ class ImprintOperationsTest {
         @DisplayName("should maintain correct payload offsets after merge")
         void shouldMaintainCorrectPayloadOffsetsAfterMerge() throws ImprintException {
             // Given records with different field sizes
-            ImprintRecord record1 = ImprintRecord.builder(testSchema)
+            var record1 = ImprintRecord.builder(testSchema)
                     .field(1, 42)              // 4 bytes
                     .field(3, "hello")        // 5+ bytes
                     .build();
 
-            ImprintRecord record2 = ImprintRecord.builder(testSchema)
+            var record2 = ImprintRecord.builder(testSchema)
                     .field(2, true)          // 1 byte
                     .field(4, new byte[]{1, 2, 3, 4, 5}) // 5+ bytes
                     .build();
 
             // When merging
-            ImprintRecord merged = record1.merge(record2);
+            var merged = record1.merge(record2);
 
             // Then all fields should be accessible with correct values
             assertEquals(42, merged.getInt32(1));
@@ -588,9 +589,9 @@ class ImprintOperationsTest {
             var validBuffer = validRecord.serializeToBuffer();
 
             // Test invalid magic byte
-            var invalidMagic = ByteBuffer.allocate(20);
-            invalidMagic.put((byte) 0x99); // Invalid magic
-            invalidMagic.put((byte) 0x01); // Valid version
+            var invalidMagic = new ImprintBuffer(new byte[20]);
+            invalidMagic.putByte((byte) 0x99); // Invalid magic
+            invalidMagic.putByte((byte) 0x01); // Valid version
             invalidMagic.flip();
             
             assertThrows(ImprintException.class, () -> 
@@ -599,8 +600,8 @@ class ImprintOperationsTest {
                 ImprintOperations.projectBytes(invalidMagic, 1));
 
             // Test buffer too small
-            var tooSmall = ByteBuffer.allocate(5);
-            tooSmall.put(new byte[]{1, 2, 3, 4, 5});
+            var tooSmall = new ImprintBuffer(new byte[5]);
+            tooSmall.putBytes(new byte[]{1, 2, 3, 4, 5});
             tooSmall.flip();
             
             assertThrows(ImprintException.class, () -> 
@@ -609,9 +610,9 @@ class ImprintOperationsTest {
                 ImprintOperations.projectBytes(tooSmall, 1));
 
             // Test invalid version
-            var invalidVersion = ByteBuffer.allocate(20);
-            invalidVersion.put((byte) 0x49); // Valid magic
-            invalidVersion.put((byte) 0x99); // Invalid version
+            var invalidVersion = new ImprintBuffer(new byte[20]);
+            invalidVersion.putByte((byte) 0x49); // Valid magic
+            invalidVersion.putByte((byte) 0x99); // Invalid version
             invalidVersion.flip();
             
             assertThrows(ImprintException.class, () -> 
@@ -694,5 +695,4 @@ class ImprintOperationsTest {
             assertEquals("field5", projectedRecord.getString(5));
         }
     }
-
 }

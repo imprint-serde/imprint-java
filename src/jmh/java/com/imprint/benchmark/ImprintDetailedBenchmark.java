@@ -26,18 +26,12 @@ public class ImprintDetailedBenchmark {
 
     private DataGenerator.TestRecord testData;
     private ImprintRecordBuilder preBuiltBuilder;
-    private ImprintRecord preBuiltRecord;
     private static final SchemaId SCHEMA_ID = new SchemaId(1, 1);
 
     @Setup(Level.Trial)
     public void setup() {
         testData = DataGenerator.createTestRecord();
-        try {
-            preBuiltBuilder = buildRecord(testData);
-            preBuiltRecord = preBuiltBuilder.build();
-        } catch (ImprintException e) {
-            throw new RuntimeException(e);
-        }
+        preBuiltBuilder = buildRecord(testData);
     }
 
     private ImprintRecordBuilder buildRecord(DataGenerator.TestRecord pojo) {
@@ -75,12 +69,6 @@ public class ImprintDetailedBenchmark {
     }
 
     @Benchmark
-    public void serializeToBuffer(Blackhole bh) {
-        // Benchmark: Record → Bytes (just buffer copy)
-        bh.consume(preBuiltRecord.serializeToBuffer());
-    }
-
-    @Benchmark
     public void fullPipeline(Blackhole bh) {
         // Benchmark: POJO → Builder → Bytes (complete pipeline)
         try {
@@ -97,7 +85,6 @@ public class ImprintDetailedBenchmark {
                 .mode(Mode.AverageTime)
                 .timeUnit(TimeUnit.NANOSECONDS)
                 .build();
-
         new Runner(opt).run();
     }
 }

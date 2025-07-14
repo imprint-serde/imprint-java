@@ -1,7 +1,6 @@
 package com.imprint;
 
 import com.imprint.core.*;
-import com.imprint.types.*;
 import com.imprint.error.ErrorType;
 import com.imprint.error.ImprintException;
 import org.junit.jupiter.api.Test;
