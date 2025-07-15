@@ -179,8 +179,8 @@ public final class ImprintSerializers {
      * Serialize an Instant as milliseconds since Unix epoch (UTC).
      */
     public static void serializeTimestamp(Instant value, ImprintBuffer buffer) {
-        int millisSinceEpoch = (int) value.toEpochMilli();
-        buffer.putInt(millisSinceEpoch);
+        long millisSinceEpoch = value.toEpochMilli();
+        buffer.putLong(millisSinceEpoch);
     }
 
     public static int estimateSize(TypeCode typeCode, Object value) {
@@ -202,7 +202,7 @@ public final class ImprintSerializers {
         if (code == TypeCode.DATE.getCode()) return 4;
         if (code == TypeCode.TIME.getCode()) return 4;
         if (code == TypeCode.UUID.getCode()) return 16;
-        if (code == TypeCode.TIMESTAMP.getCode()) return 4;
+        if (code == TypeCode.TIMESTAMP.getCode()) return 8;
         if (code == TypeCode.DECIMAL.getCode()) {
             var decimal = (BigDecimal) value;
             byte[] unscaledBytes = decimal.unscaledValue().toByteArray();

@@ -894,7 +894,7 @@ public class IntegrationTest {
         LocalTime testTime = LocalTime.now().truncatedTo(ChronoUnit.MILLIS); // Current time with millisecond precision
         UUID testUuid = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
         BigDecimal testDecimal = new BigDecimal("123.456789");
-        Instant testTimestamp = Instant.now().truncatedTo(ChronoUnit.MILLIS); // Current timestamp with millisecond precision
+        Instant testTimestamp = Instant.now().truncatedTo(ChronoUnit.MILLIS);
         
         var record = ImprintRecord.builder(schemaId)
                 .field(1, testDate)
@@ -969,7 +969,7 @@ public class IntegrationTest {
         LocalTime time = LocalTime.now().truncatedTo(ChronoUnit.MILLIS); // Truncate to millisecond precision
         UUID uuid = UUID.randomUUID();
         BigDecimal decimal = new BigDecimal("42.42");
-        Instant timestamp = Instant.now().truncatedTo(ChronoUnit.MILLIS); // Truncate to millisecond precision
+        Instant timestamp = Instant.now().truncatedTo(ChronoUnit.MILLIS);
         
         // Test that the auto-conversion in fieldIfNotNull works
         var record = ImprintRecord.builder(schemaId)

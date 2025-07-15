@@ -106,10 +106,10 @@ public final class ImprintDeserializers {
                 var unscaledValue = new BigInteger(unscaledBytes);
                 return new BigDecimal(unscaledValue, scale);
             case TIMESTAMP:
-                if (buffer.remaining() < 4) {
+                if (buffer.remaining() < 8) {
                     throw new ImprintException(ErrorType.BUFFER_UNDERFLOW, "Not enough bytes for timestamp");
                 }
-                int millisSinceEpoch = buffer.getInt();
+                long millisSinceEpoch = buffer.getLong();
                 return Instant.ofEpochMilli(millisSinceEpoch);
             default:
                 throw new ImprintException(ErrorType.SERIALIZATION_ERROR, "Cannot deserialize " + typeCode + " as primitive");
