@@ -5,16 +5,17 @@ import com.imprint.error.ImprintException;
 import com.imprint.util.ImprintBuffer;
 import lombok.experimental.UtilityClass;
 
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
-/**
- * Static serialization methods for all Imprint types.
- * Eliminates virtual dispatch overhead from TypeHandler interface.
- */
 @UtilityClass
 public final class ImprintSerializers {
 
@@ -55,7 +56,6 @@ public final class ImprintSerializers {
     public static void serializeArray(List<?> list, ImprintBuffer buffer, Function<Object, TypeCode> typeConverter, BiConsumer<Object, ImprintBuffer> elementSerializer)
             throws ImprintException {
         buffer.putVarInt(list.size());
-        
         if (list.isEmpty())
             return; // Empty arrays technically don't need type code
 
@@ -139,6 +139,49 @@ public final class ImprintSerializers {
         // NULL values have no payload data
     }
 
+    /**
+     * Serialize a LocalDate as days since Unix epoch.
+     */
+    public static void serializeDate(LocalDate value, ImprintBuffer buffer) {
+        int daysSinceEpoch = (int) value.toEpochDay();
+        buffer.putInt(daysSinceEpoch);
+    }
+    
+    /**
+     * Serialize a LocalTime as milliseconds since midnight.
+     */
+    public static void serializeTime(LocalTime value, ImprintBuffer buffer) {
+        int millisSinceMidnight = (int) (value.toNanoOfDay() / 1_000_000);
+        buffer.putInt(millisSinceMidnight);
+    }
+    
+    /**
+     * Serialize a UUID as 16-byte binary representation.
+     */
+    public static void serializeUuid(UUID value, ImprintBuffer buffer) {
+        buffer.putLong(value.getMostSignificantBits());
+        buffer.putLong(value.getLeastSignificantBits());
+    }
+    
+    /**
+     * Serialize a BigDecimal as scale + unscaled value.
+     */
+    public static void serializeDecimal(BigDecimal value, ImprintBuffer buffer) {
+        int scale = value.scale();
+        byte[] unscaledBytes = value.unscaledValue().toByteArray();
+        
+        buffer.putVarInt(scale);
+        buffer.putVarInt(unscaledBytes.length);
+        buffer.putBytes(unscaledBytes);
+    }
+    
+    /**
+     * Serialize an Instant as milliseconds since Unix epoch (UTC).
+     */
+    public static void serializeTimestamp(Instant value, ImprintBuffer buffer) {
+        long millisSinceEpoch = value.toEpochMilli();
+        buffer.putLong(millisSinceEpoch);
+    }
 
     public static int estimateSize(TypeCode typeCode, Object value) {
         byte code = typeCode.getCode();
@@ -156,6 +199,15 @@ public final class ImprintSerializers {
         }
         if (code == TypeCode.ARRAY.getCode() || code == TypeCode.MAP.getCode()) return 512;
         if (code == TypeCode.ROW.getCode()) return 1024;
+        if (code == TypeCode.DATE.getCode()) return 4;
+        if (code == TypeCode.TIME.getCode()) return 4;
+        if (code == TypeCode.UUID.getCode()) return 16;
+        if (code == TypeCode.TIMESTAMP.getCode()) return 8;
+        if (code == TypeCode.DECIMAL.getCode()) {
+            var decimal = (BigDecimal) value;
+            byte[] unscaledBytes = decimal.unscaledValue().toByteArray();
+            return 2 + 2 + unscaledBytes.length;
+        }
         throw new IllegalArgumentException("Unknown TypeCode: " + typeCode);
     }
 }

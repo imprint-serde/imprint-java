@@ -6,7 +6,13 @@ import com.imprint.error.ImprintException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -877,5 +883,145 @@ public class IntegrationTest {
         assertEquals(objectProjected.getDirectory().size(), bytesProjectedRecord.getDirectory().size());
         assertEquals(objectProjected.getString(1), bytesProjectedRecord.getString(1));
         assertEquals(objectProjected.getInt32(3), bytesProjectedRecord.getInt32(3));
+    }
+
+    @Test
+    @DisplayName("Native Types: Date, Time, UUID, Decimal, Timestamp round-trip")
+    void testNativeTypesRoundTrip() throws ImprintException {
+        var schemaId = new SchemaId(200, 0x12345678);
+        
+        LocalDate testDate = LocalDate.of(2023, 12, 25);
+        LocalTime testTime = LocalTime.now().truncatedTo(ChronoUnit.MILLIS); // Current time with millisecond precision
+        UUID testUuid = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+        BigDecimal testDecimal = new BigDecimal("123.456789");
+        Instant testTimestamp = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        
+        var record = ImprintRecord.builder(schemaId)
+                .field(1, testDate)
+                .field(2, testTime)
+                .field(3, testUuid)
+                .field(4, testDecimal)
+                .field(5, testTimestamp)
+                .build();
+        
+        assertEquals(testDate, record.getDate(1));
+        assertEquals(testTime, record.getTime(2));
+        assertEquals(testUuid, record.getUuid(3));
+        assertEquals(testDecimal, record.getDecimal(4));
+        assertEquals(testTimestamp, record.getTimestamp(5));
+        assertEquals(5, record.getFieldCount());
+        
+        // Test serialization round-trip
+        var deserialized = serializeAndDeserialize(record);
+        assertEquals(testDate, deserialized.getDate(1));
+        assertEquals(testTime, deserialized.getTime(2));
+        assertEquals(testUuid, deserialized.getUuid(3));
+        assertEquals(testDecimal, deserialized.getDecimal(4));
+        assertEquals(testTimestamp, deserialized.getTimestamp(5));
+    }
+
+    @Test
+    @DisplayName("Native Types: Edge cases and boundary values")
+    void testNativeTypesEdgeCases() throws ImprintException {
+        var schemaId = new SchemaId(201, 0x87654321);
+        
+        // Test edge values
+        LocalDate minDate = LocalDate.of(1970, 1, 1); // Unix epoch
+        LocalDate maxDate = LocalDate.of(9999, 12, 31);
+        LocalTime minTime = LocalTime.MIN; // 00:00:00
+        LocalTime maxTime = LocalTime.MAX.truncatedTo(ChronoUnit.MILLIS); // Maximum time with millisecond precision
+        UUID nilUuid = UUID.fromString("00000000-0000-0000-0000-000000000000");
+        BigDecimal largeDecimal = new BigDecimal("99999999999999999999.999999999999999999");
+        BigDecimal smallDecimal = new BigDecimal("0.000000000000000001");
+        Instant epochTimestamp = Instant.ofEpochMilli(0); // Unix epoch
+        Instant futureTimestamp = Instant.ofEpochMilli(4102444800000L); // Year 2100
+        
+        var record = ImprintRecord.builder(schemaId)
+                .field(1, minDate)
+                .field(2, maxDate)
+                .field(3, minTime)
+                .field(4, maxTime)
+                .field(5, nilUuid)
+                .field(6, largeDecimal)
+                .field(7, smallDecimal)
+                .field(8, epochTimestamp)
+                .field(9, futureTimestamp)
+                .build();
+        
+        var deserialized = serializeAndDeserialize(record);
+        assertEquals(minDate, deserialized.getDate(1));
+        assertEquals(maxDate, deserialized.getDate(2));
+        assertEquals(minTime, deserialized.getTime(3));
+        assertEquals(maxTime, deserialized.getTime(4));
+        assertEquals(nilUuid, deserialized.getUuid(5));
+        assertEquals(largeDecimal, deserialized.getDecimal(6));
+        assertEquals(smallDecimal, deserialized.getDecimal(7));
+        assertEquals(epochTimestamp, deserialized.getTimestamp(8));
+        assertEquals(futureTimestamp, deserialized.getTimestamp(9));
+    }
+
+    @Test
+    @DisplayName("Native Types: Auto-conversion in fieldIfNotNull")
+    void testNativeTypesAutoConversion() throws ImprintException {
+        var schemaId = new SchemaId(202, 0xabcdef01);
+        
+        LocalDate date = LocalDate.now();
+        LocalTime time = LocalTime.now().truncatedTo(ChronoUnit.MILLIS); // Truncate to millisecond precision
+        UUID uuid = UUID.randomUUID();
+        BigDecimal decimal = new BigDecimal("42.42");
+        Instant timestamp = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        
+        // Test that the auto-conversion in fieldIfNotNull works
+        var record = ImprintRecord.builder(schemaId)
+                .fieldIfNotNull(1, date)
+                .fieldIfNotNull(2, time)
+                .fieldIfNotNull(3, uuid)
+                .fieldIfNotNull(4, decimal)
+                .fieldIfNotNull(5, timestamp)
+                .fieldIfNotNull(6, null) // Should not add this field
+                .build();
+        
+        assertEquals(5, record.getFieldCount());
+        assertEquals(date, record.getDate(1));
+        assertEquals(time, record.getTime(2));
+        assertEquals(uuid, record.getUuid(3));
+        assertEquals(decimal, record.getDecimal(4));
+        assertEquals(timestamp, record.getTimestamp(5));
+        assertFalse(record.hasField(6));
+    }
+
+    @Test
+    @DisplayName("Native Types: Operations with new types")
+    void testNativeTypesOperations() throws ImprintException {
+        var schemaId = new SchemaId(203, 0xfedcba98);
+        
+        var record1 = ImprintRecord.builder(schemaId)
+                .field(1, LocalDate.of(2023, 1, 1))
+                .field(2, LocalTime.of(12, 0, 0))
+                .field(3, Instant.ofEpochMilli(1672531200000L)) // 2023-01-01T00:00:00Z
+                .build();
+
+        var record2 = ImprintRecord.builder(schemaId)
+                .field(4, UUID.randomUUID())
+                .field(5, new BigDecimal("100.00"))
+                .build();
+
+        // Test merge with native types
+        var merged = record1.merge(record2);
+        assertEquals(5, merged.getFieldCount());
+        assertEquals(LocalDate.of(2023, 1, 1), merged.getDate(1));
+        assertEquals(LocalTime.of(12, 0, 0), merged.getTime(2));
+        assertEquals(Instant.ofEpochMilli(1672531200000L), merged.getTimestamp(3));
+        assertNotNull(merged.getUuid(4));
+        assertEquals(new BigDecimal("100.00"), merged.getDecimal(5));
+
+        // Test project with native types
+        var projected = merged.project(1, 3, 5);
+        assertEquals(3, projected.getFieldCount());
+        assertEquals(LocalDate.of(2023, 1, 1), projected.getDate(1));
+        assertEquals(Instant.ofEpochMilli(1672531200000L), projected.getTimestamp(3));
+        assertEquals(new BigDecimal("100.00"), projected.getDecimal(5));
+        assertFalse(projected.hasField(2));
+        assertFalse(projected.hasField(4));
     }
 }

@@ -10,9 +10,14 @@ import com.imprint.util.ImprintBuffer;
 import lombok.SneakyThrows;
 import lombok.Value;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * A fluent builder for creating ImprintRecord instances with type-safe, 
@@ -57,6 +62,11 @@ public final class ImprintRecordBuilder {
         static FieldValue ofBytes(byte[] value) { return new FieldValue(TypeCode.BYTES.getCode(), value); }
         static FieldValue ofArray(List<?> value) { return new FieldValue(TypeCode.ARRAY.getCode(), value); }
         static FieldValue ofMap(Map<?, ?> value) { return new FieldValue(TypeCode.MAP.getCode(), value); }
+        static FieldValue ofDate(LocalDate value) { return new FieldValue(TypeCode.DATE.getCode(), value); }
+        static FieldValue ofTime(LocalTime value) { return new FieldValue(TypeCode.TIME.getCode(), value); }
+        static FieldValue ofUuid(UUID value) { return new FieldValue(TypeCode.UUID.getCode(), value); }
+        static FieldValue ofDecimal(BigDecimal value) { return new FieldValue(TypeCode.DECIMAL.getCode(), value); }
+        static FieldValue ofTimestamp(Instant value) { return new FieldValue(TypeCode.TIMESTAMP.getCode(), value); }
         static FieldValue ofNull() { return new FieldValue(TypeCode.NULL.getCode(), null); }
     }
 
@@ -105,6 +115,27 @@ public final class ImprintRecordBuilder {
 
     public ImprintRecordBuilder field(int id, Map<?, ?> map) {
         return addField(id, FieldValue.ofMap(map));
+    }
+
+    // New native types
+    public ImprintRecordBuilder field(int id, LocalDate value) {
+        return addField(id, FieldValue.ofDate(value));
+    }
+
+    public ImprintRecordBuilder field(int id, LocalTime value) {
+        return addField(id, FieldValue.ofTime(value));
+    }
+
+    public ImprintRecordBuilder field(int id, UUID value) {
+        return addField(id, FieldValue.ofUuid(value));
+    }
+
+    public ImprintRecordBuilder field(int id, BigDecimal value) {
+        return addField(id, FieldValue.ofDecimal(value));
+    }
+
+    public ImprintRecordBuilder field(int id, Instant value) {
+        return addField(id, FieldValue.ofTimestamp(value));
     }
 
     // Nested records
@@ -223,6 +254,21 @@ public final class ImprintRecordBuilder {
         }
         if (obj instanceof ImprintRecord) {
             return new FieldValue(TypeCode.ROW.getCode(), obj);
+        }
+        if (obj instanceof LocalDate) {
+            return FieldValue.ofDate((LocalDate) obj);
+        }
+        if (obj instanceof LocalTime) {
+            return FieldValue.ofTime((LocalTime) obj);
+        }
+        if (obj instanceof UUID) {
+            return FieldValue.ofUuid((UUID) obj);
+        }
+        if (obj instanceof BigDecimal) {
+            return FieldValue.ofDecimal((BigDecimal) obj);
+        }
+        if (obj instanceof Instant) {
+            return FieldValue.ofTimestamp((Instant) obj);
         }
 
         throw new IllegalArgumentException("Unsupported type for auto-conversion: " + obj.getClass().getName());
@@ -351,6 +397,21 @@ public final class ImprintRecordBuilder {
                 break;
             case MAP:
                 serializeMap((Map<?, ?>) value, buffer);
+                break;
+            case DATE:
+                ImprintSerializers.serializeDate((LocalDate) value, buffer);
+                break;
+            case TIME:
+                ImprintSerializers.serializeTime((LocalTime) value, buffer);
+                break;
+            case UUID:
+                ImprintSerializers.serializeUuid((UUID) value, buffer);
+                break;
+            case DECIMAL:
+                ImprintSerializers.serializeDecimal((BigDecimal) value, buffer);
+                break;
+            case TIMESTAMP:
+                ImprintSerializers.serializeTimestamp((Instant) value, buffer);
                 break;
             case ROW:
                 // Nested record serialization
